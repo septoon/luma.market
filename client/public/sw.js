@@ -1,7 +1,7 @@
 /* global self, caches, fetch, clients */
 
-const CACHE_NAME = "luma-market-v2";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/market.icon.png", "/icons/icon-192.png", "/icons/icon-512.png"];
+const CACHE_NAME = "luma-market-v3";
+const APP_SHELL = ["/manifest.webmanifest", "/market.icon.png", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
@@ -22,7 +22,7 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
 
   event.respondWith(
-    fetch(request)
+    fetch(request.mode === "navigate" ? new self.Request(request, { cache: "no-store" }) : request)
       .then((response) => {
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));

@@ -9,12 +9,14 @@ export type LifePosSession = {
   lifePosToken: string;
   orgGuid: string;
   orgName: string;
+  userName?: string;
   createdAt: number;
 };
 
 type PendingAuth = {
   lifePosToken: string;
   organizations: LifePosOrganization[];
+  userName?: string;
   createdAt: number;
 };
 
@@ -33,26 +35,27 @@ function cleanup() {
   }
 }
 
-export function createPendingAuth(lifePosToken: string, organizations: LifePosOrganization[]) {
+export function createPendingAuth(lifePosToken: string, organizations: LifePosOrganization[], userName?: string) {
   cleanup();
   const authId = randomUUID();
-  pendingAuths.set(authId, { lifePosToken, organizations, createdAt: Date.now() });
+  pendingAuths.set(authId, { lifePosToken, organizations, userName, createdAt: Date.now() });
   return authId;
 }
 
-export function createSession(lifePosToken: string, org: LifePosOrganization) {
+export function createSession(lifePosToken: string, org: LifePosOrganization, userName?: string) {
   cleanup();
   const sessionToken = randomUUID();
   sessions.set(sessionToken, {
     lifePosToken,
     orgGuid: org.guid,
     orgName: org.name,
+    userName,
     createdAt: Date.now(),
   });
   return sessionToken;
 }
 
-export function createSessionFromPending(authId: string, orgGuid: string) {
+export function consumePendingAuth(authId: string, orgGuid: string) {
   cleanup();
   const pending = pendingAuths.get(authId);
   if (!pending) return null;
@@ -62,8 +65,9 @@ export function createSessionFromPending(authId: string, orgGuid: string) {
 
   pendingAuths.delete(authId);
   return {
-    sessionToken: createSession(pending.lifePosToken, org),
+    lifePosToken: pending.lifePosToken,
     org,
+    userName: pending.userName,
   };
 }
 

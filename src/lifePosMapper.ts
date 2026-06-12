@@ -29,6 +29,7 @@ export type LifePosSale = {
   number?: unknown;
   state?: unknown;
   payment_status?: unknown;
+  payment_info?: LifePosPaymentInfo;
   opened_at?: unknown;
   created_at?: unknown;
   updated_at?: unknown;
@@ -45,6 +46,11 @@ export type LifePosSale = {
     username?: unknown;
   };
   positions?: LifePosSalePosition[];
+};
+
+export type LifePosPaymentInfo = {
+  kind: PaymentKind;
+  label: string;
 };
 
 export type LifePosSalesResponse = {
@@ -133,6 +139,7 @@ function saleItems(sale: LifePosSale): OperationItem[] {
 }
 
 function paymentKind(sale: LifePosSale): PaymentKind {
+  if (sale.payment_info) return sale.payment_info.kind;
   const status = stringValue(sale.payment_status);
   if (status === "Paid") return "paid";
   if (status === "NotPaid") return "notPaid";
@@ -140,6 +147,7 @@ function paymentKind(sale: LifePosSale): PaymentKind {
 }
 
 function paymentLabel(sale: LifePosSale) {
+  if (sale.payment_info) return sale.payment_info.label;
   const status = stringValue(sale.payment_status);
   if (status === "Paid") return "Оплачено";
   if (status === "NotPaid") return "Не оплачено";
@@ -236,7 +244,9 @@ function paymentBreakdown(sales: LifePosSale[]) {
     buckets[paymentKind(sale)].amount += Math.abs(saleAmount(sale));
   }
 
-  const visible = [buckets.paid, buckets.notPaid, buckets.unknown].filter((bucket) => bucket.amount > 0);
+  const visible = [buckets.cash, buckets.card, buckets.sbp, buckets.paid, buckets.notPaid, buckets.unknown].filter(
+    (bucket) => bucket.amount > 0,
+  );
   const total = visible.reduce((sum, bucket) => sum + bucket.amount, 0);
   return visible.map((bucket) => ({
     ...bucket,

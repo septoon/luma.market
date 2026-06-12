@@ -5,7 +5,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import { z } from "zod";
 import { lifePosClient } from "./lifePosClient.js";
-import { createPendingAuth, createSession, createSessionFromPending, getSession } from "./sessionStore.js";
+import { consumePendingAuth, createPendingAuth, createSession, getSession } from "./sessionStore.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
@@ -35,14 +35,17 @@ app.post("/api/auth/login", async (req, res, next) => {
     });
     const { phone, password } = schema.parse(req.body);
 
-    const token = await lifePosClient.signInByPhone(phone, password);
+    const auth = await lifePosClient.signInByPhone(phone, password);
+    const { token } = auth;
     const organizations = await lifePosClient.listOrganizations(token);
 
     if (organizations.length === 1) {
       const org = organizations[0];
+      const userName = await lifePosClient.getCurrentUserNameByToken(token, org.guid).catch(() => undefined);
       res.json({
-        sessionToken: createSession(token, org),
+        sessionToken: createSession(token, org, userName),
         org,
+        userName,
         organizations,
       });
       return;
@@ -57,20 +60,42 @@ app.post("/api/auth/login", async (req, res, next) => {
   }
 });
 
-app.post("/api/auth/select-org", (req, res) => {
-  const schema = z.object({
-    authId: z.string().uuid(),
-    orgGuid: z.string().min(1),
-  });
-  const { authId, orgGuid } = schema.parse(req.body);
-  const session = createSessionFromPending(authId, orgGuid);
+app.post("/api/auth/select-org", async (req, res, next) => {
+  try {
+    const schema = z.object({
+      authId: z.string().uuid(),
+      orgGuid: z.string().min(1),
+    });
+    const { authId, orgGuid } = schema.parse(req.body);
+    const pending = consumePendingAuth(authId, orgGuid);
 
-  if (!session) {
-    res.status(400).json({ error: "Organization selection expired or invalid" });
-    return;
+    if (!pending) {
+      res.status(400).json({ error: "Organization selection expired or invalid" });
+      return;
+    }
+
+    const userName =
+      (await lifePosClient.getCurrentUserNameByToken(pending.lifePosToken, pending.org.guid).catch(() => undefined)) ??
+      pending.userName;
+
+    res.json({
+      sessionToken: createSession(pending.lifePosToken, pending.org, userName),
+      org: pending.org,
+      userName,
+    });
+  } catch (error) {
+    next(error);
   }
+});
 
-  res.json(session);
+app.get("/api/me", async (req, res, next) => {
+  try {
+    const session = getSession(req.header("X-Luma-Session"));
+    const userName = await lifePosClient.getCurrentUserName(session).catch(() => session?.userName);
+    res.json({ userName: userName ?? null });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/summary", async (req, res, next) => {

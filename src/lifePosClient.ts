@@ -4,6 +4,7 @@ import {
   buildDashboardSummary,
   getReportPeriod,
   mapSalesToOperations,
+  type LifePosPaymentInfo,
   type LifePosSalesResponse,
 } from "./lifePosMapper.js";
 import type { LifePosOrganization, LifePosSession } from "./sessionStore.js";
@@ -15,6 +16,29 @@ const orgGuid = process.env.LIFE_POS_ORG_GUID;
 const clientId = process.env.LIFE_POS_CLIENT_ID ?? "726f79ad-5af6-4eae-bbd4-66f84313cd35";
 const cacheTtlMs = 15_000;
 const salesCache = new Map<string, { expiresAt: number; response: LifePosSalesResponse }>();
+
+type LifePosTerminalResponse = {
+  items?: Array<{
+    guid?: unknown;
+  }>;
+};
+
+type LifePosTransaction = {
+  amount?: {
+    value?: unknown;
+  };
+  payment_type?: unknown;
+  operation?: unknown;
+  status?: unknown;
+  card_number?: unknown;
+  meta_data?: {
+    purpose?: unknown;
+  };
+};
+
+type LifePosTransactionResponse = {
+  items?: LifePosTransaction[];
+};
 
 function isConfigured() {
   return Boolean(lifePosToken && orgGuid);
@@ -42,9 +66,13 @@ async function lifePosRequest<T>(path: string): Promise<T> {
 }
 
 async function lifePosSessionRequest<T>(session: LifePosSession, path: string): Promise<T> {
+  return lifePosTokenRequest<T>(session.lifePosToken, path);
+}
+
+async function lifePosTokenRequest<T>(token: string, path: string): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     headers: {
-      Authorization: `Bearer ${session.lifePosToken}`,
+      Authorization: `Bearer ${token}`,
       "Accept-Language": "ru-RU",
       "X-LP-Client-Identifier": clientId,
       "X-LP-Client-Type": "WebApp",
@@ -82,6 +110,78 @@ async function fetchSalesPage(session: LifePosSession | null | undefined, pageTo
   return session ? lifePosSessionRequest<LifePosSalesResponse>(session, path) : lifePosRequest<LifePosSalesResponse>(path);
 }
 
+async function orgRequest<T>(session: LifePosSession | null | undefined, path: string): Promise<T> {
+  if (session) return lifePosSessionRequest<T>(session, path);
+  return lifePosRequest<T>(path);
+}
+
+function transactionRangeQuery(range?: ReportRange) {
+  const query = new URLSearchParams({
+    presentation: "full",
+    order_by: "registered_at_desc",
+  });
+  if (range) {
+    const period = getReportPeriod(range);
+    query.set("registered_at_from", period.start.toISOString());
+    query.set("registered_at_to", period.end.toISOString());
+  }
+  return query;
+}
+
+function cardLabel(transaction: LifePosTransaction) {
+  const cardNumber = readText(transaction.card_number);
+  return cardNumber ? `Карта ${cardNumber.replaceAll("*", "•")}` : "Карта";
+}
+
+function transactionPaymentInfo(kind: "bank" | "quick-payments", transaction: LifePosTransaction): LifePosPaymentInfo | null {
+  if (readText(transaction.status) !== "Completed" || readText(transaction.operation) !== "Payment") return null;
+  if (kind === "bank") return { kind: "card", label: cardLabel(transaction) };
+  return { kind: "sbp", label: "СБП" };
+}
+
+async function fetchTransactionPaymentMap(session: LifePosSession | null | undefined, range?: ReportRange) {
+  const result = new Map<string, LifePosPaymentInfo>();
+  const org = session?.orgGuid ?? orgGuid;
+  if (!org) return result;
+
+  for (const kind of ["bank", "quick-payments"] as const) {
+    const terminals = await orgRequest<LifePosTerminalResponse>(session, `/orgs/${org}/terminals/${kind}?presentation=full`).catch(
+      () => null,
+    );
+    for (const terminal of terminals?.items ?? []) {
+      const terminalGuid = readText(terminal.guid);
+      if (!terminalGuid) continue;
+      const query = transactionRangeQuery(range);
+      const transactions = await orgRequest<LifePosTransactionResponse>(
+        session,
+        `/orgs/${org}/terminals/${kind}/${terminalGuid}/transactions?${query.toString()}`,
+      ).catch(() => null);
+      for (const transaction of transactions?.items ?? []) {
+        const purpose = readText(transaction.meta_data?.purpose);
+        const paymentInfo = transactionPaymentInfo(kind, transaction);
+        if (purpose && paymentInfo) result.set(purpose, paymentInfo);
+      }
+    }
+  }
+
+  return result;
+}
+
+async function enrichSalesWithPayments(session: LifePosSession | null | undefined, sales: LifePosSalesResponse, range?: ReportRange) {
+  const paymentBySaleNumber = await fetchTransactionPaymentMap(session, range);
+  const items = (sales.items ?? []).map((sale) => {
+    const number = readText(sale.number);
+    const paymentInfo = number ? paymentBySaleNumber.get(number) : null;
+    if (paymentInfo) return { ...sale, payment_info: paymentInfo };
+    if (readText(sale.payment_status) === "Paid" && moneyValue(sale.total_sum) > 0) {
+      return { ...sale, payment_info: { kind: "cash", label: "Наличные" } satisfies LifePosPaymentInfo };
+    }
+    return sale;
+  });
+
+  return { ...sales, items };
+}
+
 async function getSalesResponse(session?: LifePosSession | null, range?: ReportRange) {
   if (!session && !isConfigured()) return null;
 
@@ -99,7 +199,7 @@ async function getSalesResponse(session?: LifePosSession | null, range?: ReportR
     nextPageToken = nextPage.next_page_token;
   }
 
-  const response = { ...firstPage, items };
+  const response = await enrichSalesWithPayments(session, { ...firstPage, items }, range);
   salesCache.set(key, { expiresAt: Date.now() + cacheTtlMs, response });
   return response;
 }
@@ -109,6 +209,66 @@ function readToken(payload: unknown) {
   const record = payload as Record<string, unknown>;
   const token = record.token ?? record.access_token ?? record.accessToken;
   return typeof token === "string" && token.length > 0 ? token : null;
+}
+
+function readText(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function moneyValue(value: { value?: unknown } | undefined) {
+  return typeof value?.value === "number" && Number.isFinite(value.value) ? value.value / 100 : 0;
+}
+
+function readUserNameFromRecord(record: Record<string, unknown>): string | null {
+  const direct =
+    readText(record.name) ??
+    readText(record.full_name) ??
+    readText(record.fullName) ??
+    readText(record.display_name) ??
+    readText(record.displayName) ??
+    readText(record.fio) ??
+    readText(record.email) ??
+    readText(record.phone);
+  if (direct) return direct;
+
+  const firstName = readText(record.first_name) ?? readText(record.firstName);
+  const lastName = readText(record.last_name) ?? readText(record.lastName);
+  const composed = [firstName, lastName].filter(Boolean).join(" ").trim();
+  return composed || null;
+}
+
+function readUserName(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const record = payload as Record<string, unknown>;
+
+  const direct = readUserNameFromRecord(record);
+  if (direct) return direct;
+
+  const data = record.data && typeof record.data === "object" ? (record.data as Record<string, unknown>) : null;
+  const nestedRecords = [record.user, record.employee, record.account, record.profile, data?.user, data?.employee].filter(
+    (item): item is Record<string, unknown> => Boolean(item && typeof item === "object"),
+  );
+
+  for (const nested of nestedRecords) {
+    const name = readUserNameFromRecord(nested);
+    if (name) return name;
+  }
+
+  return undefined;
+}
+
+function readCurrentEmployeeName(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const record = payload as Record<string, unknown>;
+  return (
+    readText(record.name) ??
+    readText(record.full_name) ??
+    readText(record.fullName) ??
+    readText(record.display_name) ??
+    readText(record.displayName) ??
+    readText(record.username) ??
+    undefined
+  );
 }
 
 function readOrganizations(payload: unknown): LifePosOrganization[] {
@@ -163,7 +323,10 @@ export const lifePosClient = {
       throw new Error("Life POS auth response does not contain token");
     }
 
-    return token;
+    return {
+      token,
+      userName: readUserName(payload),
+    };
   },
   async listOrganizations(token: string) {
     const response = await fetch(`${apiBase}/orgs?presentation=full`, {
@@ -185,6 +348,20 @@ export const lifePosClient = {
     }
 
     return organizations;
+  },
+  async getCurrentUserNameByToken(token: string, targetOrgGuid: string) {
+    const query = new URLSearchParams({
+      presentation: "full",
+      include_permissions: "false",
+    });
+    const payload = await lifePosTokenRequest<unknown>(token, `/orgs/${targetOrgGuid}/me?${query.toString()}`);
+    return readCurrentEmployeeName(payload);
+  },
+  async getCurrentUserName(session?: LifePosSession | null) {
+    if (session?.userName) return session.userName;
+    if (session) return this.getCurrentUserNameByToken(session.lifePosToken, session.orgGuid);
+    if (lifePosToken && orgGuid) return this.getCurrentUserNameByToken(lifePosToken, orgGuid);
+    return undefined;
   },
   async getSummary(session?: LifePosSession | null, range?: ReportRange) {
     const sales = await getSalesResponse(session, range);

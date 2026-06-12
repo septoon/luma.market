@@ -1,0 +1,18 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+build/
+
+# env / secrets
+.env
+.env.*
+
+# logs / caches
+npm-debug.log*
+coverage/
+*.tsbuildinfo
+
+# OS
+.DS_Store

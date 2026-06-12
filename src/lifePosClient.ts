@@ -44,17 +44,19 @@ function isConfigured() {
   return Boolean(lifePosToken && orgGuid);
 }
 
-async function lifePosRequest<T>(path: string): Promise<T> {
+async function lifePosRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (!isConfigured()) {
     throw new Error("Life POS is not configured");
   }
 
   const response = await fetch(`${apiBase}${path}`, {
+    ...init,
     headers: {
       Authorization: `Bearer ${lifePosToken}`,
       "Accept-Language": "ru-RU",
       "X-LP-Client-Identifier": clientId,
       "X-LP-Client-Type": "WebApp",
+      ...init?.headers,
     },
   });
 
@@ -69,13 +71,15 @@ async function lifePosSessionRequest<T>(session: LifePosSession, path: string): 
   return lifePosTokenRequest<T>(session.lifePosToken, path);
 }
 
-async function lifePosTokenRequest<T>(token: string, path: string): Promise<T> {
+async function lifePosTokenRequest<T>(token: string, path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
+    ...init,
     headers: {
       Authorization: `Bearer ${token}`,
       "Accept-Language": "ru-RU",
       "X-LP-Client-Identifier": clientId,
       "X-LP-Client-Type": "WebApp",
+      ...init?.headers,
     },
   });
 
@@ -385,5 +389,39 @@ export const lifePosClient = {
     const sales = await getSalesResponse(session, range);
     if (sales) return buildAnalytics(sales.items ?? [], range);
     return analytics;
+  },
+  clearSalesCache() {
+    salesCache.clear();
+  },
+  async configureOperationNotifications(session: LifePosSession | null | undefined, primaryUrl: string, secondaryUrl?: string) {
+    const targetOrgGuid = session?.orgGuid ?? orgGuid;
+    if (!targetOrgGuid) throw new Error("Life POS organization is not configured");
+
+    const body = [
+      {
+        op: "add",
+        path: "/extensions/notification_service",
+        value: {
+          turned_on: true,
+          primary_url_for_notifications: primaryUrl,
+          ...(secondaryUrl ? { secondary_url_for_notifications: secondaryUrl } : {}),
+          version: "1.0",
+        },
+      },
+    ];
+
+    const init = {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-LP-Client-Extensions": "notification_service",
+      },
+      body: JSON.stringify(body),
+    };
+
+    if (session) {
+      return lifePosTokenRequest<unknown>(session.lifePosToken, `/v6/orgs/${targetOrgGuid}`, init);
+    }
+    return lifePosRequest<unknown>(`/v6/orgs/${targetOrgGuid}`, init);
   },
 };

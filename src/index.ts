@@ -5,10 +5,21 @@ import helmet from "helmet";
 import morgan from "morgan";
 import { z } from "zod";
 import { lifePosClient } from "./lifePosClient.js";
+import {
+  configureWebPush,
+  deletePushSubscription,
+  getPushStatus,
+  getWebPushPublicKey,
+  notifySaleWebhook,
+  savePushSubscription,
+} from "./pushSubscriptions.js";
 import { consumePendingAuth, createPendingAuth, createSession, getSession } from "./sessionStore.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
+const webhookSecret = process.env.LIFE_POS_NOTIFICATION_SECRET;
+
+configureWebPush();
 
 function readReportRange(req: express.Request) {
   const schema = z.object({
@@ -26,6 +37,92 @@ app.use(morgan("dev"));
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, lifePosConfigured: lifePosClient.isConfigured() });
 });
+
+app.get("/api/push/public-key", (req, res) => {
+  res.json({
+    publicKey: getWebPushPublicKey(),
+    ...getPushStatus(getSession(req.header("X-Luma-Session"))),
+  });
+});
+
+app.post("/api/push/subscriptions", (req, res, next) => {
+  try {
+    const session = getSession(req.header("X-Luma-Session"));
+    if (!session) {
+      res.status(401).json({ error: "Session is required" });
+      return;
+    }
+
+    const schema = z.object({
+      endpoint: z.string().url(),
+      expirationTime: z.number().nullable().optional(),
+      keys: z.object({
+        p256dh: z.string().min(1),
+        auth: z.string().min(1),
+      }),
+    });
+    savePushSubscription(session, schema.parse(req.body));
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/push/subscriptions", (req, res, next) => {
+  try {
+    const schema = z.object({ endpoint: z.string().url() });
+    deletePushSubscription(schema.parse(req.body).endpoint);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/life-pos/notifications/configure", async (req, res, next) => {
+  try {
+    const session = getSession(req.header("X-Luma-Session"));
+    const adminSecret = process.env.LUMA_ADMIN_SECRET;
+    if (!session && adminSecret && req.header("X-Luma-Admin-Secret") !== adminSecret) {
+      res.status(401).json({ error: "Invalid admin secret" });
+      return;
+    }
+
+    const schema = z.object({
+      primaryUrl: z.string().url().optional(),
+      secondaryUrl: z.string().url().optional(),
+    });
+    const { primaryUrl, secondaryUrl } = schema.parse(req.body ?? {});
+    const url = primaryUrl ?? process.env.LIFE_POS_NOTIFICATIONS_URL;
+    if (!url) {
+      res.status(400).json({ error: "LIFE_POS_NOTIFICATIONS_URL or primaryUrl is required" });
+      return;
+    }
+
+    await lifePosClient.configureOperationNotifications(session, url, secondaryUrl);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+async function handleLifePosNotification(req: express.Request, res: express.Response, next: express.NextFunction) {
+  try {
+    const providedSecret = req.params.secret || req.header("X-Luma-Webhook-Secret");
+    if (webhookSecret && providedSecret !== webhookSecret) {
+      res.status(401).json({ error: "Invalid webhook secret" });
+      return;
+    }
+
+    lifePosClient.clearSalesCache();
+    const result = await notifySaleWebhook(req.body);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+}
+
+app.post("/api/life-pos/notifications", handleLifePosNotification);
+app.post("/api/life-pos/notifications/:secret", handleLifePosNotification);
 
 app.post("/api/auth/login", async (req, res, next) => {
   try {

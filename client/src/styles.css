@@ -1,0 +1,652 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
+  --color-luma-green: #16a34a;
+  --color-luma-green-soft: #dcfce7;
+  --color-luma-ink: #0f172a;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    @apply min-h-full bg-[#f7f9f8] text-luma-ink antialiased;
+  }
+
+  body {
+    @apply m-0 min-h-dvh min-w-80 overflow-hidden bg-[#f7f9f8] font-sans;
+    overscroll-behavior: none;
+  }
+
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+
+  button {
+    @apply cursor-pointer;
+  }
+
+  #root {
+    @apply min-h-dvh w-full bg-[#f7f9f8];
+  }
+}
+
+@layer components {
+  .screen {
+    @apply mx-auto flex h-dvh min-h-dvh w-full max-w-md flex-col overflow-y-auto overflow-x-hidden bg-[#f7f9f8] px-4 pb-[calc(18px+env(safe-area-inset-bottom))] pt-[env(safe-area-inset-top)] text-slate-950 shadow-2xl shadow-slate-200/70;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+
+  .screen::-webkit-scrollbar {
+    display: none;
+  }
+
+  .appHeader {
+    @apply sticky top-0 z-20 mb-3 grid min-h-14 grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-slate-200/70 bg-[#f7f9f8]/95 pt-2 backdrop-blur-xl;
+  }
+
+  .appHeader > strong {
+    @apply min-w-0 max-w-full truncate justify-self-center text-[17px] font-black tracking-[-0.01em];
+  }
+
+  .appHeader.noBack {
+    @apply grid-cols-[minmax(0,1fr)_auto];
+  }
+
+  .appHeader.noBack > strong {
+    @apply justify-self-start;
+  }
+
+  .appHeader.noBack .placeholderButton {
+    @apply hidden;
+  }
+
+  .headerRight {
+    @apply flex items-center justify-end gap-1;
+  }
+
+  .iconButton {
+    @apply grid size-10 place-items-center rounded-2xl border border-transparent bg-transparent text-slate-900 transition active:scale-95 active:bg-slate-200/70;
+  }
+
+  .iconButton.placeholderButton {
+    @apply invisible pointer-events-none;
+  }
+
+  .notificationButton {
+    @apply inline-flex h-10 items-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-2.5 text-xs font-black text-slate-600 shadow-sm shadow-slate-200/50 transition active:scale-95 active:bg-slate-50 disabled:cursor-default disabled:opacity-55 disabled:active:scale-100;
+  }
+
+  .notificationButton.enabled {
+    @apply border-emerald-100 bg-luma-green-soft text-green-800;
+  }
+
+  .notificationButton.error {
+    @apply border-red-100 bg-red-50 text-red-600;
+  }
+
+  .panel {
+    @apply mb-3 rounded-3xl border border-slate-200/80 bg-white p-4 shadow-sm shadow-slate-200/50;
+  }
+
+  .panel h2 {
+    @apply m-0 mb-3 text-[15px] font-black tracking-[-0.01em] text-slate-950;
+  }
+
+  .welcomeScreen {
+    @apply justify-between bg-white px-6 pb-8 pt-[calc(64px+env(safe-area-inset-top))];
+  }
+
+  .welcomeCopy h1 {
+    @apply m-0 mb-5 text-[42px] font-black leading-none tracking-[-0.04em] text-transparent;
+    background: linear-gradient(135deg, #071a46 0%, #0b5fd7 56%, #6255f6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+
+  .welcomeCopy p {
+    @apply m-0 max-w-[330px] text-[17px] font-medium leading-[1.35] text-slate-600;
+  }
+
+  .welcomeImage {
+    @apply my-8 block w-full flex-1 object-contain object-center;
+    min-height: 260px;
+    max-height: 45dvh;
+  }
+
+  .primaryButton {
+    @apply h-14 w-full rounded-2xl border-0 text-lg font-black text-white shadow-lg shadow-blue-500/30 transition active:scale-[0.99] disabled:opacity-60;
+    background: linear-gradient(135deg, #0b5fd7 0%, #168af0 45%, #19c4f4 100%);
+  }
+
+  .loginScreen {
+    @apply justify-center bg-white pt-[env(safe-area-inset-top)];
+  }
+
+  .loginCard {
+    @apply w-full rounded-[30px] border border-blue-100 bg-white p-5 shadow-xl shadow-blue-100/70;
+  }
+
+  .loginIcon {
+    @apply mb-5 grid size-14 place-items-center rounded-2xl text-blue-600 shadow-sm shadow-blue-100;
+    background: linear-gradient(135deg, #eaf4ff 0%, #dffbff 100%);
+  }
+
+  .loginCard h1 {
+    @apply m-0 mb-2 text-3xl font-black tracking-[-0.03em] text-transparent;
+    background: linear-gradient(135deg, #071a46 0%, #0b5fd7 62%, #6255f6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+
+  .loginCard p {
+    @apply m-0 mb-6 text-[15px] font-medium leading-snug text-slate-500;
+  }
+
+  .loginCard form,
+  .loginCard label {
+    @apply grid gap-3;
+  }
+
+  .loginCard label {
+    @apply text-sm font-black text-slate-700;
+  }
+
+  .loginCard input,
+  .loginCard select {
+    @apply h-13 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 text-base font-bold text-slate-950 outline-none transition placeholder:font-bold placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100;
+  }
+
+  .formError {
+    @apply text-sm font-semibold text-red-600;
+  }
+
+  .reportControl {
+    @apply sticky top-14 z-10 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-3xl border border-slate-200/80 bg-white/95 p-2 shadow-sm shadow-slate-200/40 backdrop-blur-xl;
+  }
+
+  .segmented {
+    @apply flex rounded-2xl bg-slate-100 p-1;
+  }
+
+  .segmented button {
+    @apply h-9 rounded-xl border-0 bg-transparent px-3 text-sm font-bold text-slate-500 transition active:scale-95;
+  }
+
+  .segmented button.active {
+    @apply bg-white text-slate-950 shadow-sm;
+  }
+
+  .reportSegment {
+    @apply min-w-0 w-full;
+  }
+
+  .reportSegment button {
+    @apply min-w-0 flex-1 overflow-hidden px-1.5 text-[12px] whitespace-nowrap;
+  }
+
+  .calendarPick {
+    @apply relative inline-flex h-10 shrink-0 items-center gap-2 rounded-2xl bg-slate-100 px-3 text-sm font-black whitespace-nowrap text-slate-700 transition active:scale-95;
+  }
+
+  .calendarPick.active {
+    @apply bg-luma-green-soft text-green-800;
+  }
+
+  .nativeDateInput {
+    @apply absolute inset-0 h-full w-full cursor-pointer opacity-0;
+  }
+
+  @media (max-width: 430px) {
+    .reportControl {
+      @apply grid-cols-1 rounded-[26px];
+    }
+
+    .reportSegment button {
+      @apply h-10 text-[13px];
+    }
+
+    .calendarPick {
+      @apply w-full justify-center;
+    }
+  }
+
+  .heroRevenue {
+    @apply mb-3 min-h-[132px] rounded-[28px] border border-emerald-100 bg-white p-5 text-slate-950 shadow-sm shadow-slate-200/60;
+    background:
+      radial-gradient(circle at 88% 6%, rgb(220 252 231 / 0.9), transparent 34%),
+      linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  }
+
+  .revenueMain > span,
+  .operationAmount > span {
+    @apply block text-sm font-bold text-slate-500;
+  }
+
+  .revenueLine {
+    @apply flex min-w-0 items-start justify-between gap-4;
+  }
+
+  .revenueMain {
+    @apply min-w-0 flex-1;
+  }
+
+  .heroRevenue h1,
+  .operationAmount h1 {
+    @apply m-0 mt-3 break-words text-[44px] font-black leading-none tracking-[-0.05em];
+  }
+
+  .deltaPill {
+    @apply grid min-w-24 shrink-0 justify-items-end gap-1 pt-7 text-right;
+  }
+
+  .deltaPill .delta {
+    @apply rounded-2xl bg-luma-green-soft px-3 py-2 text-luma-green;
+  }
+
+  .deltaPill small {
+    @apply text-xs leading-tight text-slate-500;
+  }
+
+  .delta {
+    @apply text-sm font-black text-luma-green;
+  }
+
+  .deltaBad,
+  .refundText {
+    @apply text-red-500;
+  }
+
+  .metricsGrid {
+    @apply mb-3 grid gap-2;
+  }
+
+  .metricsGrid.three {
+    @apply grid-cols-3;
+  }
+
+  .metricsGrid.two {
+    @apply grid-cols-2;
+  }
+
+  .metricsGrid.four {
+    @apply grid-cols-4;
+  }
+
+  .metricCard {
+    @apply min-h-[94px] rounded-3xl border border-slate-200/80 bg-white p-3 shadow-sm shadow-slate-200/45;
+  }
+
+  .metricCard span:first-child {
+    @apply block text-[11px] font-semibold leading-tight text-slate-500;
+  }
+
+  .metricCard strong {
+    @apply mt-3 block text-xl font-black tracking-[-0.03em] text-slate-950;
+  }
+
+  .shiftPanel {
+    @apply flex items-start justify-between gap-4;
+  }
+
+  .shiftPanel p {
+    @apply m-0 mt-1 text-sm leading-snug text-slate-500;
+  }
+
+  .shiftStatus {
+    @apply grid justify-items-end gap-2 text-right;
+  }
+
+  .shiftStatus span {
+    @apply rounded-2xl bg-luma-green-soft px-3 py-1.5 text-xs font-black text-green-800;
+  }
+
+  .shiftStatus small {
+    @apply text-xs text-slate-500;
+  }
+
+  .shiftStatus strong {
+    @apply text-xl font-black leading-tight tracking-[-0.03em];
+  }
+
+  .paymentGrid {
+    @apply grid grid-cols-3 gap-2;
+  }
+
+  .paymentMetric {
+    @apply rounded-2xl bg-slate-50 p-3;
+  }
+
+  .paymentMetric span,
+  .paymentMetric small {
+    @apply block text-xs text-slate-500;
+  }
+
+  .paymentMetric strong {
+    @apply my-1 block text-base font-black;
+  }
+
+  .progressTrack {
+    @apply mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100;
+  }
+
+  .progressTrack span {
+    @apply block h-full rounded-full;
+  }
+
+  .sectionHead {
+    @apply mb-2 flex items-center justify-between gap-3;
+  }
+
+  .sectionHead button {
+    @apply inline-flex items-center gap-1 rounded-xl border-0 bg-transparent px-2 py-1 text-sm font-bold text-slate-500 active:bg-slate-100;
+  }
+
+  .sectionHead .readonlyTag {
+    @apply rounded-xl bg-slate-100 px-2 py-1 text-[11px] font-black text-slate-500;
+  }
+
+  .operationList {
+    @apply grid;
+  }
+
+  .operationRow {
+    @apply grid min-h-[66px] w-full grid-cols-[38px_minmax(0,1fr)_42px_auto_16px] items-center gap-2 border-0 border-t border-slate-100 bg-transparent py-3 text-left first:border-t-0 active:bg-slate-50;
+  }
+
+  .rowIcon {
+    @apply grid size-9 place-items-center rounded-2xl bg-luma-green text-white;
+  }
+
+  .rowIcon.refund {
+    @apply bg-red-500;
+  }
+
+  .rowMain strong,
+  .rowMain small {
+    @apply block;
+  }
+
+  .rowMain strong {
+    @apply text-[14px] font-black;
+  }
+
+  .rowMain small,
+  .rowTime {
+    @apply text-xs text-slate-500;
+  }
+
+  .amount {
+    @apply whitespace-nowrap text-base font-black;
+  }
+
+  .mutedIcon {
+    @apply text-slate-300;
+  }
+
+  .bottomActions {
+    @apply sticky bottom-0 z-10 mt-auto grid grid-cols-3 overflow-hidden rounded-[26px] border border-slate-200 bg-white/95 shadow-xl shadow-slate-200/80 backdrop-blur-xl;
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+
+  .bottomActions button {
+    @apply grid min-h-20 place-items-center content-center gap-1 border-0 border-l border-slate-100 bg-transparent text-luma-green first:border-l-0 active:bg-slate-50;
+  }
+
+  .bottomActions span {
+    @apply text-xs font-semibold text-slate-700;
+  }
+
+  .operationAmount {
+    @apply rounded-[28px] bg-slate-950 p-5 text-white;
+  }
+
+  .operationAmount > div {
+    @apply mt-3 flex items-center justify-between gap-4;
+  }
+
+  .statusBadge {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-2xl bg-emerald-400/15 px-3 py-2 text-sm font-black text-emerald-300;
+  }
+
+  .statusBad {
+    @apply bg-red-100 text-red-600;
+  }
+
+  .infoList {
+    @apply grid gap-4;
+  }
+
+  .infoLine {
+    @apply grid grid-cols-[28px_1fr_auto] items-center gap-3 text-sm;
+  }
+
+  .infoLine strong {
+    @apply text-right font-black;
+  }
+
+  .infoIcon {
+    @apply grid size-7 place-items-center rounded-xl bg-slate-100 text-slate-600;
+  }
+
+  .receiptLine {
+    @apply grid min-h-9 grid-cols-[1fr_42px_54px_64px] items-center gap-2 text-sm;
+  }
+
+  .receiptLine small {
+    @apply text-right text-xs text-slate-500;
+  }
+
+  .receiptLine strong {
+    @apply text-right font-black;
+  }
+
+  .receiptTotals {
+    @apply -mx-4 mt-3 grid grid-cols-[1fr_auto] gap-3 rounded-b-[22px] border-t border-slate-100 bg-slate-50 p-4;
+  }
+
+  .receiptTotals span:last-of-type,
+  .receiptTotals strong:last-child {
+    @apply text-lg font-black;
+  }
+
+  .readonlyNotice,
+  .emptyText {
+    @apply m-0 text-sm leading-snug text-slate-500;
+  }
+
+  .readonlyNotice {
+    @apply rounded-2xl border border-slate-200 bg-white p-4;
+  }
+
+  .journalSummary {
+    @apply grid grid-cols-[1fr_auto] items-end gap-x-3 gap-y-1;
+  }
+
+  .journalSummary span {
+    @apply text-sm text-slate-500;
+  }
+
+  .journalSummary strong {
+    @apply row-span-2 text-4xl font-black tracking-[-0.04em];
+  }
+
+  .journalSummary small {
+    @apply text-lg font-black;
+  }
+
+  .journalSegment {
+    @apply w-full;
+  }
+
+  .journalSegment button {
+    @apply flex-1;
+  }
+
+  .shiftPill {
+    @apply mb-3 flex min-h-10 items-center justify-center gap-2 rounded-full border border-slate-200 bg-white text-sm font-semibold text-slate-600;
+  }
+
+  .shiftPill span {
+    @apply size-1.5 rounded-full bg-luma-green;
+  }
+
+  .chartArea {
+    @apply grid h-48 grid-rows-[18px_1fr_18px] gap-2;
+  }
+
+  .chartLegend {
+    @apply flex gap-4 text-[11px] text-slate-500;
+  }
+
+  .chartLegend span::before {
+    @apply mr-1 inline-block h-1 w-4 rounded-full bg-luma-green align-middle content-[''];
+  }
+
+  .chartLegend .legendYesterday::before {
+    background: repeating-linear-gradient(90deg, #94a3b8 0 4px, transparent 4px 8px);
+    height: 1px;
+  }
+
+  .bars {
+    @apply grid grid-cols-24 items-end gap-1 border-b border-slate-200;
+    background:
+      linear-gradient(#e2e8f0 1px, transparent 1px) 0 25% / 100% 25%,
+      linear-gradient(#e2e8f0 1px, transparent 1px) 0 50% / 100% 25%,
+      linear-gradient(#e2e8f0 1px, transparent 1px) 0 75% / 100% 25%;
+  }
+
+  .barSlot {
+    @apply relative flex h-full items-end justify-center;
+  }
+
+  .todayBar {
+    @apply min-h-0.5 w-4/5 rounded-t-md bg-luma-green;
+  }
+
+  .yesterdayMark {
+    @apply absolute bottom-0 w-full border-t border-dashed border-slate-400;
+  }
+
+  .chartAxis {
+    @apply flex justify-between text-[10px] text-slate-500;
+  }
+
+  .donutRow {
+    @apply grid grid-cols-[92px_1fr] items-center gap-4;
+  }
+
+  .donut {
+    @apply relative size-24 rounded-full;
+  }
+
+  .donut::after {
+    @apply absolute inset-6 rounded-full bg-white content-[''];
+  }
+
+  .donutRow p {
+    @apply mb-2 text-xs;
+  }
+
+  .donutRow p span {
+    @apply mr-1 inline-block size-2 rounded-full;
+  }
+
+  .donutRow p strong,
+  .donutRow p small {
+    @apply ml-4 block;
+  }
+
+  .donutRow p small {
+    @apply text-slate-500;
+  }
+
+  .periodSegment button {
+    @apply min-w-[64px];
+  }
+
+  .soldProductsPanel {
+    @apply pb-2;
+  }
+
+  .soldProductsList {
+    @apply grid;
+  }
+
+  .soldProductRow {
+    @apply grid min-h-[58px] grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-t border-slate-100 py-2.5 first:border-t-0;
+  }
+
+  .soldProductRank {
+    @apply row-span-2 grid size-7 place-items-center rounded-xl bg-luma-green-soft text-xs font-black text-green-800;
+  }
+
+  .soldProductName {
+    @apply min-w-0 truncate text-sm font-semibold leading-tight text-slate-800;
+  }
+
+  .soldProductRow strong {
+    @apply justify-self-end whitespace-nowrap text-sm font-black;
+  }
+
+  .soldProductRow small {
+    @apply col-start-2 text-xs text-slate-500;
+  }
+
+  .compactProducts .soldProductRow small {
+    @apply col-start-2;
+  }
+
+  .syncBar {
+    @apply flex min-h-12 items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 text-xs text-slate-500;
+  }
+
+  .syncBar span,
+  .syncBar button {
+    @apply inline-flex items-center gap-2;
+  }
+
+  .syncBar span svg {
+    @apply text-luma-green;
+  }
+
+  .syncBar button {
+    @apply border-0 bg-transparent font-black text-luma-green;
+  }
+
+  .loadingScreen {
+    @apply grid place-items-center content-center gap-4 text-slate-500;
+  }
+
+  .spin {
+    animation: spin 0.9s linear infinite;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 380px) {
+  .metricsGrid.three,
+  .metricsGrid.four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .paymentGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .heroRevenue h1,
+  .operationAmount h1 {
+    font-size: 40px;
+  }
+}

@@ -1,27 +1,19 @@
 # dependencies
 node_modules/
-**/node_modules/
 
 # builds
 dist/
-**/dist/
 build/
-**/build/
 
 # env / secrets
 .env
 .env.*
-**/.env
-**/.env.*
 
 # logs / caches
 npm-debug.log*
 coverage/
-**/coverage/
 *.tsbuildinfo
-**/*.tsbuildinfo
-server/data/push-subscriptions.json
+data/push-subscriptions.json
 
 # OS
 .DS_Store
-**/.DS_Store

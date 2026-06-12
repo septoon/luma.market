@@ -44,6 +44,12 @@ function isConfigured() {
   return Boolean(lifePosToken && orgGuid);
 }
 
+async function parseLifePosResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text) return null as T;
+  return JSON.parse(text) as T;
+}
+
 async function lifePosRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (!isConfigured()) {
     throw new Error("Life POS is not configured");
@@ -64,7 +70,7 @@ async function lifePosRequest<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`Life POS request failed: ${response.status}`);
   }
 
-  return response.json() as Promise<T>;
+  return parseLifePosResponse<T>(response);
 }
 
 async function lifePosSessionRequest<T>(session: LifePosSession, path: string): Promise<T> {
@@ -87,7 +93,7 @@ async function lifePosTokenRequest<T>(token: string, path: string, init?: Reques
     throw new Error(`Life POS request failed: ${response.status}`);
   }
 
-  return response.json() as Promise<T>;
+  return parseLifePosResponse<T>(response);
 }
 
 function sessionKey(session?: LifePosSession | null) {

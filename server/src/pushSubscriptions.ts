@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import webPush, { type PushSubscription } from "web-push";
 import { mapSaleToOperation, type LifePosSale } from "./lifePosMapper.js";
 import type { LifePosSession } from "./sessionStore.js";
@@ -17,6 +20,9 @@ type SaleNotification = {
 
 const subscriptions = new Map<string, StoredSubscription>();
 const seenSaleIds = new Set<string>();
+const subscriptionsFile = process.env.PUSH_SUBSCRIPTIONS_FILE
+  ? resolve(process.env.PUSH_SUBSCRIPTIONS_FILE)
+  : join(dirname(fileURLToPath(import.meta.url)), "../data/push-subscriptions.json");
 
 function readText(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -29,6 +35,58 @@ function readNumber(value: unknown) {
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
+
+function readStoredSubscription(value: unknown): StoredSubscription | null {
+  const record = objectValue(value);
+  const subscription = objectValue(record?.subscription);
+  const keys = objectValue(subscription?.keys);
+  const endpoint = readText(subscription?.endpoint);
+  const orgGuid = readText(record?.orgGuid);
+  const p256dh = readText(keys?.p256dh);
+  const auth = readText(keys?.auth);
+
+  if (!endpoint || !orgGuid || !p256dh || !auth) return null;
+
+  return {
+    subscription: {
+      endpoint,
+      expirationTime: readNumber(subscription?.expirationTime),
+      keys: { p256dh, auth },
+    },
+    orgGuid,
+    userName: readText(record?.userName) ?? undefined,
+    createdAt: readNumber(record?.createdAt) ?? Date.now(),
+  };
+}
+
+function loadStoredSubscriptions() {
+  if (!existsSync(subscriptionsFile)) return;
+
+  try {
+    const payload = JSON.parse(readFileSync(subscriptionsFile, "utf8")) as unknown;
+    const record = objectValue(payload);
+    const items = Array.isArray(record?.subscriptions) ? record.subscriptions : [];
+
+    subscriptions.clear();
+    for (const item of items) {
+      const stored = readStoredSubscription(item);
+      if (stored) subscriptions.set(stored.subscription.endpoint, stored);
+    }
+  } catch (error) {
+    console.warn("Failed to load Web Push subscriptions", error);
+  }
+}
+
+function persistStoredSubscriptions() {
+  const payload = JSON.stringify({ version: 1, subscriptions: [...subscriptions.values()] }, null, 2);
+  mkdirSync(dirname(subscriptionsFile), { recursive: true });
+
+  const temporaryFile = `${subscriptionsFile}.${process.pid}.tmp`;
+  writeFileSync(temporaryFile, payload);
+  renameSync(temporaryFile, subscriptionsFile);
+}
+
+loadStoredSubscriptions();
 
 function readNestedObject(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
@@ -125,10 +183,12 @@ export function savePushSubscription(session: LifePosSession, subscription: Push
     userName: session.userName,
     createdAt: Date.now(),
   });
+  persistStoredSubscriptions();
 }
 
 export function deletePushSubscription(endpoint: string) {
   subscriptions.delete(endpoint);
+  persistStoredSubscriptions();
 }
 
 export function getPushStatus(session: LifePosSession | null) {
@@ -164,6 +224,7 @@ export async function notifySaleWebhook(payload: unknown) {
   });
 
   let delivered = 0;
+  const staleEndpoints: string[] = [];
   await Promise.all(
     targetSubscriptions.map(async ([endpoint, item]) => {
       try {
@@ -172,10 +233,15 @@ export async function notifySaleWebhook(payload: unknown) {
       } catch (error) {
         const statusCode =
           typeof error === "object" && error && "statusCode" in error ? Number(error.statusCode) : undefined;
-        if (statusCode === 404 || statusCode === 410) subscriptions.delete(endpoint);
+        if (statusCode === 404 || statusCode === 410) staleEndpoints.push(endpoint);
       }
     }),
   );
+
+  if (staleEndpoints.length > 0) {
+    for (const endpoint of staleEndpoints) subscriptions.delete(endpoint);
+    persistStoredSubscriptions();
+  }
 
   return { delivered };
 }

@@ -1,30 +1,18 @@
 {
-  "name": "@luma-market/server",
+  "name": "luma-market",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
-    "express": "^5.2.1",
-    "helmet": "^8.1.0",
-    "morgan": "^1.10.1",
-    "web-push": "^3.6.7",
-    "zod": "^4.1.13"
+    "dev": "concurrently -n server,client -c blue,green \"npm run dev --workspace server\" \"npm run dev --workspace client\"",
+    "build": "npm run build --workspace server && npm run build --workspace client",
+    "lint": "npm run lint --workspace client",
+    "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace client"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6",
-    "@types/morgan": "^1.9.10",
-    "@types/node": "^24.10.1",
-    "@types/web-push": "^3.6.4",
-    "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "concurrently": "^10.0.3"
   }
 }

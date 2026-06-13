@@ -32,6 +32,18 @@ function readNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function formatPushBody(operation: ReturnType<typeof mapSaleToOperation>) {
+  if (operation.items.length === 0) return `${operation.amount.toLocaleString("ru-RU")} ₽`;
+
+  const visibleItems = operation.items.slice(0, 2).map((item) => {
+    const quantity = item.qty.toLocaleString("ru-RU");
+    return `${item.name} ×${quantity}`;
+  });
+  const hiddenCount = operation.items.length - visibleItems.length;
+
+  return hiddenCount > 0 ? `${visibleItems.join(", ")} + ещё ${hiddenCount}` : visibleItems.join(", ");
+}
+
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
@@ -213,8 +225,8 @@ export async function notifySaleWebhook(payload: unknown) {
   );
 
   const message = JSON.stringify({
-    title: "Новая продажа",
-    body: `${operation.number}: ${operation.amount.toLocaleString("ru-RU")} ₽`,
+    title: `Новая продажа на ${operation.amount.toLocaleString("ru-RU")} ₽`,
+    body: formatPushBody(operation),
     url: "/",
     tag: `sale:${operation.id}`,
     data: {

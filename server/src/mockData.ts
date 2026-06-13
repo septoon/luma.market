@@ -9,8 +9,10 @@ export const summary = {
   avgCheckDelta: 5.7,
   avgRefund: 980,
   avgRefundDelta: 4.3,
-  shiftOpenedAt: "08:00",
-  shiftDuration: "05:42:18",
+  shiftStatus: "open",
+  shiftOpenedAt: "16.05.2025, 08:00",
+  shiftClosedAt: null,
+  shiftDuration: "fiscal-documents",
   cashbox: "Касса 1",
   updatedAt: "10:36",
   payments: [

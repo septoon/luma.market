@@ -8,7 +8,7 @@ import {
   type LifePosSalesResponse,
 } from "./lifePosMapper.js";
 import type { LifePosOrganization, LifePosSession } from "./sessionStore.js";
-import type { ReportRange } from "./types.js";
+import type { DashboardSummary, ReportRange, ShiftStatus } from "./types.js";
 
 const apiBase = process.env.LIFE_POS_API_BASE ?? "https://api.life-pos.ru";
 const lifePosToken = process.env.LIFE_POS_TOKEN;
@@ -38,6 +38,29 @@ type LifePosTransaction = {
 
 type LifePosTransactionResponse = {
   items?: LifePosTransaction[];
+};
+
+type LifePosFiscalRegistrarResponse = {
+  items?: Array<{
+    guid?: unknown;
+  }>;
+};
+
+type LifePosFiscalDocument = {
+  fiscal_form?: unknown;
+  issued_at?: unknown;
+  created_at?: unknown;
+  updated_at?: unknown;
+};
+
+type LifePosFiscalDocumentResponse = {
+  items?: LifePosFiscalDocument[];
+};
+
+type ShiftInfo = {
+  status: ShiftStatus;
+  openedAt: Date | null;
+  closedAt: Date | null;
 };
 
 function isConfigured() {
@@ -177,6 +200,71 @@ async function fetchTransactionPaymentMap(session: LifePosSession | null | undef
   return result;
 }
 
+async function fetchFiscalRegistrars(session: LifePosSession | null | undefined) {
+  const org = session?.orgGuid ?? orgGuid;
+  if (!org) return [];
+
+  const query = new URLSearchParams({
+    presentation: "compact",
+    selection: "alive_only",
+  });
+  const response = await orgRequest<LifePosFiscalRegistrarResponse>(session, `/orgs/${org}/fiscal-registrars?${query.toString()}`);
+  return response.items ?? [];
+}
+
+async function fetchShiftFiscalDocuments(session: LifePosSession | null | undefined, registrarGuid: string) {
+  const org = session?.orgGuid ?? orgGuid;
+  if (!org) return [];
+
+  const query = new URLSearchParams({
+    presentation: "compact",
+    order_by: "issued_at_desc",
+    selection: "all",
+  });
+  query.append("fiscal_form", "ShiftOpeningReport");
+  query.append("fiscal_form", "ShiftClosingReport");
+
+  const response = await orgRequest<LifePosFiscalDocumentResponse>(
+    session,
+    `/orgs/${org}/fiscal-registrars/${registrarGuid}/docs?${query.toString()}`,
+  );
+  return response.items ?? [];
+}
+
+async function getShiftInfo(session?: LifePosSession | null): Promise<ShiftInfo | null> {
+  if (!session && !isConfigured()) return null;
+
+  const registrars = await fetchFiscalRegistrars(session);
+  const documents = (
+    await Promise.all(
+      registrars.map(async (registrar) => {
+        const registrarGuid = readText(registrar.guid);
+        if (!registrarGuid) return [];
+        return fetchShiftFiscalDocuments(session, registrarGuid).catch(() => []);
+      }),
+    )
+  ).flat();
+
+  const openedAt = latestDate(
+    documents
+      .filter((document) => readText(document.fiscal_form) === "ShiftOpeningReport")
+      .map((document) => readDate(document.issued_at) ?? readDate(document.created_at) ?? readDate(document.updated_at)),
+  );
+  const closedAt = latestDate(
+    documents
+      .filter((document) => readText(document.fiscal_form) === "ShiftClosingReport")
+      .map((document) => readDate(document.issued_at) ?? readDate(document.created_at) ?? readDate(document.updated_at)),
+  );
+
+  if (!openedAt && !closedAt) return null;
+
+  return {
+    status: openedAt && (!closedAt || openedAt > closedAt) ? "open" : "closed",
+    openedAt,
+    closedAt,
+  };
+}
+
 async function enrichSalesWithPayments(session: LifePosSession | null | undefined, sales: LifePosSalesResponse, range?: ReportRange) {
   const paymentBySaleNumber = await fetchTransactionPaymentMap(session, range);
   const items = (sales.items ?? []).map((sale) => {
@@ -227,6 +315,48 @@ function readText(value: unknown) {
 
 function moneyValue(value: { value?: unknown } | undefined) {
   return typeof value?.value === "number" && Number.isFinite(value.value) ? value.value / 100 : 0;
+}
+
+function readDate(value: unknown) {
+  const text = readText(value);
+  if (!text) return null;
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function latestDate(dates: Array<Date | null>) {
+  return dates.filter((date): date is Date => Boolean(date)).sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+}
+
+function formatShiftDateTime(date: Date | null) {
+  if (!date) return "Нет данных";
+  return date.toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function applyShiftInfo(summary: DashboardSummary, shiftInfo: ShiftInfo | null): DashboardSummary {
+  if (!shiftInfo) {
+    return {
+      ...summary,
+      shiftStatus: "unknown",
+      shiftOpenedAt: "Нет данных",
+      shiftClosedAt: null,
+      shiftDuration: "unknown",
+    };
+  }
+
+  return {
+    ...summary,
+    shiftStatus: shiftInfo.status,
+    shiftOpenedAt: formatShiftDateTime(shiftInfo.openedAt),
+    shiftClosedAt: shiftInfo.closedAt ? formatShiftDateTime(shiftInfo.closedAt) : null,
+    shiftDuration: "fiscal-documents",
+  };
 }
 
 function readUserNameFromRecord(record: Record<string, unknown>): string | null {
@@ -375,7 +505,10 @@ export const lifePosClient = {
   },
   async getSummary(session?: LifePosSession | null, range?: ReportRange) {
     const sales = await getSalesResponse(session, range);
-    if (sales) return buildDashboardSummary(sales.items ?? [], range);
+    if (sales) {
+      const shiftInfo = await getShiftInfo(session).catch(() => null);
+      return applyShiftInfo(buildDashboardSummary(sales.items ?? [], range), shiftInfo);
+    }
     return summary;
   },
   async getOperations(session?: LifePosSession | null, range?: ReportRange) {

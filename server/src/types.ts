@@ -8,6 +8,8 @@ export type ReportRange = {
   date?: string;
 };
 
+export type ShiftStatus = "open" | "closed" | "unknown";
+
 export type OperationItem = {
   name: string;
   qty: number;
@@ -43,7 +45,9 @@ export type DashboardSummary = {
   avgCheckDelta: number;
   avgRefund: number;
   avgRefundDelta: number;
+  shiftStatus: ShiftStatus;
   shiftOpenedAt: string;
+  shiftClosedAt: string | null;
   shiftDuration: string;
   cashbox: string;
   payments: Array<{

@@ -38,7 +38,7 @@
 
 @layer components {
   .screen {
-    @apply mx-auto flex h-dvh min-h-dvh w-full max-w-md flex-col overflow-y-auto overflow-x-hidden bg-[#f7f9f8] px-4 pb-[calc(18px+env(safe-area-inset-bottom))] pt-[env(safe-area-inset-top)] text-slate-950 shadow-2xl shadow-slate-200/70;
+    @apply mx-auto flex h-dvh min-h-dvh w-full max-w-md flex-col overflow-y-auto overflow-x-hidden bg-[#f7f9f8] px-4 pb-[calc(18px+env(safe-area-inset-bottom))] pt-0 text-slate-950 shadow-2xl shadow-slate-200/70;
     overscroll-behavior: contain;
     scrollbar-width: none;
   }
@@ -48,7 +48,10 @@
   }
 
   .appHeader {
-    @apply sticky top-0 z-20 mb-3 grid min-h-14 grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-slate-200/70 bg-[#f7f9f8]/95 pt-2 backdrop-blur-xl;
+    @apply sticky top-0 z-20 mb-3 grid shrink-0 grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-slate-200/70 bg-[#f7f9f8];
+    min-height: calc(56px + env(safe-area-inset-top, 0px));
+    margin-inline: -1rem;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 1rem 0;
   }
 
   .appHeader > strong {
@@ -237,7 +240,11 @@
     @apply min-w-0 flex-1;
   }
 
-  .heroRevenue h1,
+  .heroRevenue h1 {
+    @apply m-0 mt-3 break-words text-[40px] font-black leading-none tracking-[-0.04em];
+    font-size: clamp(36px, 10vw, 40px);
+  }
+
   .operationAmount h1 {
     @apply m-0 mt-3 break-words text-[44px] font-black leading-none tracking-[-0.05em];
   }
@@ -305,6 +312,14 @@
 
   .shiftStatus span {
     @apply rounded-2xl bg-luma-green-soft px-3 py-1.5 text-xs font-black text-green-800;
+  }
+
+  .shiftStatus span.closed {
+    @apply bg-slate-100 text-slate-600;
+  }
+
+  .shiftStatus span.unknown {
+    @apply bg-slate-100 text-slate-500;
   }
 
   .shiftStatus small {
@@ -391,8 +406,7 @@
   }
 
   .bottomActions {
-    @apply sticky bottom-0 z-10 mt-auto grid grid-cols-3 overflow-hidden rounded-[26px] border border-slate-200 bg-white/95 shadow-xl shadow-slate-200/80 backdrop-blur-xl;
-    margin-bottom: env(safe-area-inset-bottom);
+    @apply sticky bottom-0 z-10 mt-auto grid shrink-0 grid-cols-3 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-xl shadow-slate-200/80;
   }
 
   .bottomActions button {
@@ -645,7 +659,6 @@
     grid-template-columns: 1fr;
   }
 
-  .heroRevenue h1,
   .operationAmount h1 {
     font-size: 40px;
   }

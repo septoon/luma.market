@@ -537,6 +537,12 @@ function OperationRow({ operation, onOpen }: { operation: Operation; onOpen: () 
   );
 }
 
+function shiftStatusLabel(status: DashboardSummary["shiftStatus"]) {
+  if (status === "open") return "Открыта";
+  if (status === "closed") return "Закрыта";
+  return "Нет данных";
+}
+
 function HomeScreen({
   summary,
   analytics,
@@ -596,11 +602,12 @@ function HomeScreen({
       <section className="panel shiftPanel">
         <div>
           <h2>Смена</h2>
-          <p>Началась в {summary.shiftOpenedAt}</p>
+          <p>Открыта: {summary.shiftOpenedAt}</p>
+          {summary.shiftClosedAt ? <p>Закрыта: {summary.shiftClosedAt}</p> : null}
           <p>Касса: {summary.cashbox}</p>
         </div>
         <div className="shiftStatus">
-          <span>Открыта</span>
+          <span className={summary.shiftStatus}>{shiftStatusLabel(summary.shiftStatus)}</span>
         </div>
       </section>
       <PaymentBreakdown summary={summary} />

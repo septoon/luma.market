@@ -54,6 +54,7 @@ function reportQuery(query: ReportQuery) {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json",
       ...(getSessionToken() ? { "X-Luma-Session": getSessionToken() ?? "" } : {}),

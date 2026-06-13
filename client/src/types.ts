@@ -2,6 +2,7 @@ export type PaymentKind = "cash" | "card" | "sbp" | "paid" | "notPaid" | "unknow
 export type OperationKind = "sale" | "refund";
 export type ProductSalesPeriod = "today" | "yesterday" | "week";
 export type ReportPeriod = "today" | "yesterday" | "week" | "month" | "date";
+export type ShiftStatus = "open" | "closed" | "unknown";
 
 export type AuthOrganization = {
   guid: string;
@@ -67,7 +68,9 @@ export type DashboardSummary = {
   avgCheckDelta: number;
   avgRefund: number;
   avgRefundDelta: number;
+  shiftStatus: ShiftStatus;
   shiftOpenedAt: string;
+  shiftClosedAt: string | null;
   shiftDuration: string;
   cashbox: string;
   payments: Array<{

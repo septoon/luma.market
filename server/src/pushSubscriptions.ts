@@ -34,15 +34,17 @@ function readNumber(value: unknown) {
 }
 
 function formatPushBody(operation: ReturnType<typeof mapSaleToOperation>) {
-  if (operation.items.length === 0) return `${operation.amount.toLocaleString("ru-RU")} ₽`;
+  const amountLine = `Новая продажа на ${operation.amount.toLocaleString("ru-RU")} ₽`;
+  if (operation.items.length === 0) return amountLine;
 
   const visibleItems = operation.items.slice(0, 2).map((item) => {
     const quantity = item.qty.toLocaleString("ru-RU");
-    return `${item.name} ×${quantity}`;
+    return `${item.name} - ${quantity}`;
   });
   const hiddenCount = operation.items.length - visibleItems.length;
+  const itemsLine = hiddenCount > 0 ? `${visibleItems.join(", ")} + ещё ${hiddenCount}` : visibleItems.join(", ");
 
-  return hiddenCount > 0 ? `${visibleItems.join(", ")} + ещё ${hiddenCount}` : visibleItems.join(", ");
+  return `${amountLine}\n${itemsLine}`;
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -227,9 +229,9 @@ export async function notifySaleWebhook(payload: unknown) {
   );
 
   const message = JSON.stringify({
-    title: `Новая продажа на ${operation.amount.toLocaleString("ru-RU")} ₽`,
+    title: "Люма.Маркет",
     body: formatPushBody(operation),
-    url: "/",
+    url: `/?operation=${encodeURIComponent(operation.id)}`,
     tag: `sale:${operation.id}`,
     data: {
       operationId: operation.id,

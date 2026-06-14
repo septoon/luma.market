@@ -1,6 +1,6 @@
 /* global self, caches, fetch, clients */
 
-const CACHE_NAME = "luma-market-v3";
+const CACHE_NAME = "luma-market-v4";
 const APP_SHELL = ["/manifest.webmanifest", "/market.icon.png", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -56,13 +56,15 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || "/";
+  const url = new URL(event.notification.data?.url || "/", self.location.origin).href;
 
   event.waitUntil(
     clients
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((clientList) => {
         for (const client of clientList) {
+          if (!client.url.startsWith(self.location.origin)) continue;
+          if (client.url !== url && "navigate" in client) return client.navigate(url).then((targetClient) => targetClient?.focus());
           if ("focus" in client) return client.focus();
         }
         if (clients.openWindow) return clients.openWindow(url);

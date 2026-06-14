@@ -75,6 +75,17 @@ function isEnvPreviewMode() {
   return import.meta.env.DEV && new URLSearchParams(window.location.search).get("preview") === "env";
 }
 
+function operationDeepLinkId() {
+  return new URLSearchParams(window.location.search).get("operation");
+}
+
+function clearOperationDeepLink() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("operation")) return;
+  url.searchParams.delete("operation");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 function reportTitle(query: ReportQuery) {
   if (query.period === "today") return "Выручка за сегодня";
   if (query.period === "yesterday") return "Выручка за вчера";
@@ -963,6 +974,7 @@ export function App() {
   const [operations, setOperations] = useState<Operation[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
+  const [selectedOperationDetails, setSelectedOperationDetails] = useState<Operation | null>(null);
   const [isLoading, setLoading] = useState(false);
   const [reportQueryState, setReportQueryState] = useState<ReportQuery>({ period: "today" });
   const [userName, setUserName] = useState(getSavedUserName() ?? defaultUserName);
@@ -988,9 +1000,21 @@ export function App() {
     await loadData(query);
   }
 
+  async function openOperation(id: string) {
+    setSelectedOperationId(id);
+    setSelectedOperationDetails(operations.find((operation) => operation.id === id) ?? null);
+    setView("operation");
+
+    if (!operations.some((operation) => operation.id === id)) {
+      const operation = await api.operation(id).catch(() => null);
+      if (operation) setSelectedOperationDetails(operation);
+    }
+  }
+
   useEffect(() => {
     if (!hasSessionToken() && !isEnvPreviewMode()) return;
     let isMounted = true;
+    const deepLinkedOperationId = operationDeepLinkId();
 
     Promise.all([
       api.summary(reportQueryState),
@@ -1004,6 +1028,17 @@ export function App() {
         setOperations(operationsData);
         setAnalytics(analyticsData);
         setUserName(profileData.userName ?? getSavedUserName() ?? defaultUserName);
+        if (deepLinkedOperationId) {
+          setSelectedOperationId(deepLinkedOperationId);
+          setSelectedOperationDetails(operationsData.find((operation) => operation.id === deepLinkedOperationId) ?? null);
+          setView("operation");
+          return api
+            .operation(deepLinkedOperationId)
+            .then((operation) => {
+              if (isMounted) setSelectedOperationDetails(operation);
+            })
+            .catch(() => undefined);
+        }
         setView("home");
       })
       .catch(() => {
@@ -1030,8 +1065,8 @@ export function App() {
   }, [view]);
 
   const selectedOperation = useMemo(
-    () => operations.find((operation) => operation.id === selectedOperationId) ?? operations[0],
-    [operations, selectedOperationId],
+    () => selectedOperationDetails ?? operations.find((operation) => operation.id === selectedOperationId) ?? (selectedOperationId ? null : operations[0]),
+    [operations, selectedOperationDetails, selectedOperationId],
   );
 
   if (view === "welcome") return <WelcomeScreen onStart={() => setView("login")} />;
@@ -1058,8 +1093,25 @@ export function App() {
     );
   }
 
+  if (view === "operation" && !selectedOperation) {
+    return (
+      <main className="screen loadingScreen">
+        <RefreshCw className="spin" />
+        <p>Загружаем операцию...</p>
+      </main>
+    );
+  }
+
   if (view === "operation" && selectedOperation) {
-    return <OperationScreen operation={selectedOperation} onBack={() => setView("home")} />;
+    return (
+      <OperationScreen
+        operation={selectedOperation}
+        onBack={() => {
+          clearOperationDeepLink();
+          setView("home");
+        }}
+      />
+    );
   }
 
   if (view === "analytics") {
@@ -1080,10 +1132,7 @@ export function App() {
       <JournalScreen
         operations={operations}
         onBack={() => setView("home")}
-        onOpenOperation={(id) => {
-          setSelectedOperationId(id);
-          setView("operation");
-        }}
+        onOpenOperation={openOperation}
       />
     );
   }
@@ -1096,10 +1145,7 @@ export function App() {
       userName={userName}
       query={reportQueryState}
       onQueryChange={changeReportQuery}
-      onOpenOperation={(id) => {
-        setSelectedOperationId(id);
-        setView("operation");
-      }}
+      onOpenOperation={openOperation}
       onAnalytics={() => setView("analytics")}
       onJournal={() => setView("journal")}
       onLogout={() => {

@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import webPush, { type PushSubscription } from "web-push";
 import { mapSaleToOperation, type LifePosSale } from "./lifePosMapper.js";
+import { lifePosClient } from "./lifePosClient.js";
 import type { LifePosSession } from "./sessionStore.js";
 
 type StoredSubscription = {
@@ -219,7 +220,8 @@ export async function notifySaleWebhook(payload: unknown) {
   if (seenSaleIds.has(notification.id)) return { delivered: 0, skipped: "sale-already-seen" };
   seenSaleIds.add(notification.id);
 
-  const operation = mapSaleToOperation(notification.sale);
+  const enrichedSale = await lifePosClient.getSaleByIdForPush(notification.id, notification.orgGuid);
+  const operation = mapSaleToOperation(enrichedSale ?? notification.sale);
   const targetSubscriptions = [...subscriptions.entries()].filter(
     ([, item]) => !notification.orgGuid || item.orgGuid === notification.orgGuid,
   );

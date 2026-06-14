@@ -4,6 +4,7 @@ import {
   buildDashboardSummary,
   getReportPeriod,
   mapSalesToOperations,
+  type LifePosSale,
   type LifePosPaymentInfo,
   type LifePosSalesResponse,
 } from "./lifePosMapper.js";
@@ -313,6 +314,10 @@ function readText(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
 function moneyValue(value: { value?: unknown } | undefined) {
   return typeof value?.value === "number" && Number.isFinite(value.value) ? value.value / 100 : 0;
 }
@@ -395,6 +400,12 @@ function readUserName(payload: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+function readSalePayload(payload: unknown): LifePosSale | null {
+  const record = objectValue(payload);
+  if (!record) return null;
+  return (objectValue(record.sale) ?? objectValue(record.deal) ?? objectValue(record.object) ?? objectValue(record.data) ?? record) as LifePosSale;
 }
 
 function readCurrentEmployeeName(payload: unknown): string | undefined {
@@ -523,6 +534,14 @@ export const lifePosClient = {
       return mapped.find((operation) => operation.id === id) ?? mapped[0];
     }
     return operations.find((operation) => operation.id === id) ?? operations[0];
+  },
+  async getSaleByIdForPush(id: string, targetOrgGuid?: string) {
+    const targetOrg = targetOrgGuid ?? orgGuid;
+    if (!targetOrg || !isConfigured()) return null;
+
+    const query = new URLSearchParams({ presentation: "full" });
+    const payload = await lifePosRequest<unknown>(`/orgs/${targetOrg}/deals/sales/${id}?${query.toString()}`).catch(() => null);
+    return readSalePayload(payload);
   },
   async getAnalytics(session?: LifePosSession | null, range?: ReportRange) {
     const sales = await getSalesResponse(session, range);

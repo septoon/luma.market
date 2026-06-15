@@ -17,12 +17,15 @@ import {
   UserRound,
   WalletCards,
 } from "lucide-react";
-import { FormEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { api, clearSessionToken, getSavedUserName, hasSessionToken, setSessionToken, type ReportQuery } from "./api";
-import type { Analytics, AuthOrganization, DashboardSummary, Operation, PaymentKind, ProductSalesPeriod, ReportPeriod } from "./types";
+import { FormEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, type UIEvent } from "react";
+import { api, clearSessionToken, getSavedUserName, hasSessionToken, isUnauthorizedError, setSessionToken, type ReportQuery } from "./api";
+import type { Analytics, AuthOrganization, DashboardSummary, Operation, PaymentKind, ReportPeriod } from "./types";
 
 type View = "welcome" | "login" | "home" | "operation" | "analytics" | "journal" | "returns";
 type JournalPeriod = "today" | "yesterday" | "week" | "all";
+type SalesChartMode = "hours" | "days" | "weeks";
+type SoldItem = { name: string; quantity: number; unit: string; amount: number };
+type SalesChartPoint = { label: string; value: number };
 
 const money = new Intl.NumberFormat("ru-RU", {
   style: "currency",
@@ -36,13 +39,9 @@ const paymentColors: Record<PaymentKind, string> = {
   sbp: "#b7eabf",
   paid: "#22b449",
   notPaid: "#f4c84f",
+  refund: "#ef4444",
+  cancel: "#f97316",
   unknown: "#c7d1ca",
-};
-
-const productPeriodLabels: Record<ProductSalesPeriod, string> = {
-  today: "Период",
-  yesterday: "До",
-  week: "7 дней",
 };
 
 const journalPeriodLabels: Record<JournalPeriod, string> = {
@@ -71,12 +70,62 @@ function todayDateInputValue() {
   return `${year}-${month}-${day}`;
 }
 
-function isEnvPreviewMode() {
-  return import.meta.env.DEV && new URLSearchParams(window.location.search).get("preview") === "env";
+function startOfDay(date: Date) {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function addDays(date: Date, days: number) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+function addMonths(date: Date, months: number) {
+  const result = new Date(date);
+  result.setMonth(result.getMonth() + months);
+  return result;
+}
+
+function parseDateOnly(value: string | undefined) {
+  if (!value) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function reportPeriodRange(query: ReportQuery) {
+  const today = startOfDay(new Date());
+  const tomorrow = addDays(today, 1);
+  if (query.period === "yesterday") return { start: addDays(today, -1), end: today };
+  if (query.period === "week") return { start: addDays(today, -6), end: tomorrow };
+  if (query.period === "month") return { start: addMonths(today, -1), end: tomorrow };
+  if (query.period === "date") {
+    const selected = parseDateOnly(query.date) ?? today;
+    return { start: selected, end: addDays(selected, 1) };
+  }
+  return { start: today, end: tomorrow };
+}
+
+function daysInReportRange(query: ReportQuery) {
+  const range = reportPeriodRange(query);
+  return Math.max(1, Math.round((range.end.getTime() - range.start.getTime()) / 86_400_000));
 }
 
 function operationDeepLinkId() {
   return new URLSearchParams(window.location.search).get("operation");
+}
+
+function isValidReceiptUrl(value: string | undefined) {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function clearOperationDeepLink() {
@@ -283,7 +332,9 @@ function formatMoney(value: number) {
   return money.format(value).replace("RUB", "₽");
 }
 
-function Delta({ value, tone = "good" }: { value: number; tone?: "good" | "bad" }) {
+function Delta({ value, tone = "good" }: { value: number | null; tone?: "good" | "bad" }) {
+  if (value === null) return null;
+
   return (
     <span className={tone === "bad" ? "delta deltaBad" : "delta"}>
       {value >= 0 ? "↑" : "↓"} {Math.abs(value).toLocaleString("ru-RU")}%
@@ -319,7 +370,7 @@ function MetricCard({
 }: {
   label: string;
   value: string;
-  delta: number;
+  delta: number | null;
   bad?: boolean;
 }) {
   return (
@@ -528,22 +579,42 @@ function TopSoldItemsPreview({ analytics, onOpen }: { analytics: Analytics; onOp
 }
 
 function OperationRow({ operation, onOpen }: { operation: Operation; onOpen: () => void }) {
-  const isRefund = operation.kind === "refund";
+  const isShiftEvent = operation.kind === "shiftOpen" || operation.kind === "shiftClose";
+  const isRefund = operation.kind === "refund" || operation.kind === "cancel";
+  const title =
+    operation.kind === "shiftOpen"
+      ? "Открытие смены"
+      : operation.kind === "shiftClose"
+        ? "Закрытие смены"
+        : operation.kind === "refund"
+          ? "Возврат"
+          : operation.kind === "cancel"
+            ? "Отмена"
+            : operation.kind === "unknown"
+              ? "Операция"
+              : "Продажа";
+
   return (
-    <button className="operationRow" onClick={onOpen}>
-      <span className={isRefund ? "rowIcon refund" : "rowIcon"}>
-        {isRefund ? <RotateCcw size={18} /> : <Receipt size={18} />}
+    <button className={isShiftEvent ? "operationRow shiftEvent" : "operationRow"} onClick={onOpen} disabled={isShiftEvent}>
+      <span className={isRefund ? "rowIcon refund" : isShiftEvent ? "rowIcon shift" : "rowIcon"}>
+        {isRefund ? <RotateCcw size={18} /> : isShiftEvent ? <Clock3 size={18} /> : <Receipt size={18} />}
       </span>
       <span className="rowMain">
-        <strong>{isRefund ? "Возврат" : "Продажа"}</strong>
-        <small>№ {operation.number}</small>
+        <strong>{title}</strong>
+        <small>{isShiftEvent ? operation.dateTime : `№ ${operation.number}`}</small>
+        {isShiftEvent && operation.cashier ? <small>{operation.cashier}</small> : null}
       </span>
       <span className="rowTime">{operation.time}</span>
-      <strong className={isRefund ? "amount refundText" : "amount"}>
-        {isRefund ? "− " : ""}
-        {formatMoney(Math.abs(operation.amount))}
-      </strong>
-      <ChevronRight size={18} className="mutedIcon" />
+      {isShiftEvent ? <strong className="amount shiftAmount">{operation.cashbox}</strong> : null}
+      {!isShiftEvent ? (
+        <>
+          <strong className={isRefund ? "amount refundText" : "amount"}>
+            {isRefund ? "− " : ""}
+            {formatMoney(Math.abs(operation.amount))}
+          </strong>
+          <ChevronRight size={18} className="mutedIcon" />
+        </>
+      ) : null}
     </button>
   );
 }
@@ -551,7 +622,16 @@ function OperationRow({ operation, onOpen }: { operation: Operation; onOpen: () 
 function shiftStatusLabel(status: DashboardSummary["shiftStatus"]) {
   if (status === "open") return "Открыта";
   if (status === "closed") return "Закрыта";
-  return "Нет данных";
+  return "Неизвестно";
+}
+
+function shiftOpenedLine(summary: DashboardSummary) {
+  const openedAt = summary.shiftOpenedAt === "Нет данных" || summary.shiftOpenedAt === "--:--" ? "—" : summary.shiftOpenedAt;
+  return `Открыта: ${openedAt}`;
+}
+
+function shouldShowShiftPanel(query: ReportQuery) {
+  return query.period === "today" || query.period === "yesterday" || query.period === "date";
 }
 
 function HomeScreen({
@@ -579,8 +659,27 @@ function HomeScreen({
   onLogout: () => void;
   onRefresh: () => void;
 }) {
+  const lastScrollTopRef = useRef(0);
+  const isBottomNavHiddenRef = useRef(false);
+  const [isBottomNavHidden, setBottomNavHidden] = useState(false);
+
+  function handleHomeScroll(event: UIEvent<HTMLElement>) {
+    const nextScrollTop = event.currentTarget.scrollTop;
+    const previousScrollTop = lastScrollTopRef.current;
+    const delta = nextScrollTop - previousScrollTop;
+
+    if (Math.abs(delta) > 8) {
+      const shouldHide = delta > 0 && nextScrollTop > 120;
+      if (shouldHide !== isBottomNavHiddenRef.current) {
+        isBottomNavHiddenRef.current = shouldHide;
+        setBottomNavHidden(shouldHide);
+      }
+      lastScrollTopRef.current = nextScrollTop;
+    }
+  }
+
   return (
-    <main className="screen">
+    <main className="screen homeScreen" onScroll={handleHomeScroll}>
       <AppHeader
         title={userName}
         right={
@@ -599,10 +698,12 @@ function HomeScreen({
             <span>{reportTitle(query)}</span>
             <h1>{formatMoney(summary.revenue)}</h1>
           </div>
-          <div className="deltaPill" aria-label={comparisonLabel(query)}>
-            <Delta value={summary.revenueDelta} />
-            <small>{comparisonLabel(query)}</small>
-          </div>
+          {summary.revenueDelta !== null ? (
+            <div className="deltaPill" aria-label={comparisonLabel(query)}>
+              <Delta value={summary.revenueDelta} />
+              <small>{comparisonLabel(query)}</small>
+            </div>
+          ) : null}
         </div>
       </section>
       <section className="metricsGrid three">
@@ -610,17 +711,19 @@ function HomeScreen({
         <MetricCard label="Средний чек" value={formatMoney(summary.avgCheck)} delta={summary.avgCheckDelta} />
         <MetricCard label="Средний чек (возвраты)" value={`− ${formatMoney(summary.avgRefund)}`} delta={summary.avgRefundDelta} bad />
       </section>
-      <section className="panel shiftPanel">
-        <div>
-          <h2>Смена</h2>
-          <p>Открыта: {summary.shiftOpenedAt}</p>
-          {summary.shiftClosedAt ? <p>Закрыта: {summary.shiftClosedAt}</p> : null}
-          <p>Касса: {summary.cashbox}</p>
-        </div>
-        <div className="shiftStatus">
-          <span className={summary.shiftStatus}>{shiftStatusLabel(summary.shiftStatus)}</span>
-        </div>
-      </section>
+      {shouldShowShiftPanel(query) ? (
+        <section className="panel shiftPanel">
+          <div>
+            <h2>Смена</h2>
+            <p>{shiftOpenedLine(summary)}</p>
+            <p>Закрыта: {summary.shiftClosedAt ?? "—"}</p>
+            {summary.cashbox ? <p>Касса: {summary.cashbox}</p> : null}
+          </div>
+          <div className="shiftStatus">
+            <span className={summary.shiftStatus}>{shiftStatusLabel(summary.shiftStatus)}</span>
+          </div>
+        </section>
+      ) : null}
       <PaymentBreakdown summary={summary} />
       <TopSoldItemsPreview analytics={analytics} onOpen={onAnalytics} />
       <section className="panel">
@@ -640,7 +743,7 @@ function HomeScreen({
           )}
         </div>
       </section>
-      <nav className="bottomActions" aria-label="Основные действия">
+      <nav className={`bottomActions ${isBottomNavHidden ? "isHidden" : ""}`} aria-label="Основные действия">
         <button onClick={onRefresh}>
           <RefreshCw size={25} />
           <span>Обновить</span>
@@ -693,7 +796,11 @@ function JournalScreen({
 }) {
   const [period, setPeriod] = useState<JournalPeriod>("today");
   const visibleOperations = operations.filter((operation) => isOperationInPeriod(operation, period));
-  const total = visibleOperations.reduce((sum, operation) => sum + (operation.kind === "refund" ? -operation.amount : operation.amount), 0);
+  const total = visibleOperations.reduce((sum, operation) => {
+    if (operation.kind === "sale") return sum + operation.amount;
+    if (operation.kind === "refund" || operation.kind === "cancel") return sum - operation.amount;
+    return sum;
+  }, 0);
 
   return (
     <main className="screen journalScreen">
@@ -715,7 +822,6 @@ function JournalScreen({
       <section className="panel">
         <div className="sectionHead">
           <h2>Продажи и оплаты</h2>
-          <span className="readonlyTag">Только чтение</span>
         </div>
         <div className="operationList">
           {visibleOperations.length > 0 ? (
@@ -734,6 +840,8 @@ function JournalScreen({
 function OperationScreen({ operation, onBack }: { operation: Operation; onBack: () => void }) {
   const statusLabel =
     operation.receiptStatus === "sent" ? "Чек отправлен" : operation.receiptStatus === "failed" ? "Ошибка чека" : "Чек ожидает данных";
+  const signedAmount = operation.kind === "refund" || operation.kind === "cancel" ? `− ${formatMoney(operation.amount)}` : formatMoney(operation.amount);
+  const receiptUrl = isValidReceiptUrl(operation.fiscalReceiptUrl) ? operation.fiscalReceiptUrl : undefined;
 
   return (
     <main className="screen">
@@ -749,7 +857,7 @@ function OperationScreen({ operation, onBack }: { operation: Operation; onBack: 
       <section className="operationAmount panel">
         <span>Сумма операции</span>
         <div>
-          <h1>{formatMoney(operation.amount)}</h1>
+          <h1>{signedAmount}</h1>
           <strong className={operation.receiptStatus === "failed" ? "statusBadge statusBad" : "statusBadge"}>
             {statusLabel} <Check size={16} />
           </strong>
@@ -782,7 +890,12 @@ function OperationScreen({ operation, onBack }: { operation: Operation; onBack: 
           <strong>{formatMoney(operation.amount)}</strong>
         </div>
       </section>
-      <p className="readonlyNotice">Режим только чтение: приложение не изменяет продажи, возвраты, смены или кассу.</p>
+      {receiptUrl ? (
+        <button className="primaryButton receiptViewButton" onClick={() => window.open(receiptUrl, "_blank", "noopener,noreferrer")}>
+          🧾 Просмотреть чек
+        </button>
+      ) : null}
+      <p className="readonlyNotice">Приложение не изменяет продажи, возвраты, смены или кассу.</p>
     </main>
   );
 }
@@ -797,29 +910,140 @@ function InfoLine({ icon, label, value }: { icon: React.ReactNode; label: string
   );
 }
 
-function SalesChart({ analytics }: { analytics: Analytics }) {
-  const max = Math.max(...analytics.hourly.flatMap((point) => [point.today, point.yesterday]));
+const chartModeLabels: Record<SalesChartMode, string> = {
+  hours: "Часы",
+  days: "Дни",
+  weeks: "Недели",
+};
+
+function operationDate(operation: Operation) {
+  const date = new Date(operation.openedAt);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isSaleForAnalytics(operation: Operation) {
+  return operation.kind === "sale" && operation.amount > 0;
+}
+
+function isOperationWithinQuery(operation: Operation, query: ReportQuery) {
+  const date = operationDate(operation);
+  const range = reportPeriodRange(query);
+  return Boolean(date && date >= range.start && date < range.end);
+}
+
+function availableSalesChartModes(query: ReportQuery): SalesChartMode[] {
+  if (query.period === "month") return ["hours", "days", "weeks"];
+  if (query.period === "week") return ["hours", "days"];
+
+  const days = daysInReportRange(query);
+  if (days === 1) return ["hours"];
+  if (days <= 14) return ["hours", "days"];
+  return ["days", "weeks"];
+}
+
+function formatDayLabel(date: Date, showWeekday: boolean) {
+  if (showWeekday) return date.toLocaleDateString("ru-RU", { weekday: "short" }).replace(".", "");
+  return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+}
+
+function aggregateSoldItems(operations: Operation[], query: ReportQuery): SoldItem[] {
+  const items = new Map<string, SoldItem>();
+
+  for (const operation of operations) {
+    if (!isSaleForAnalytics(operation) || !isOperationWithinQuery(operation, query)) continue;
+
+    for (const item of operation.items) {
+      const existing = items.get(item.name) ?? { name: item.name, quantity: 0, unit: "шт", amount: 0 };
+      existing.quantity += item.qty;
+      existing.amount += item.total;
+      items.set(item.name, existing);
+    }
+  }
+
+  return [...items.values()].sort((a, b) => b.quantity - a.quantity).slice(0, 10);
+}
+
+function aggregateSalesChart(operations: Operation[], query: ReportQuery, mode: SalesChartMode): SalesChartPoint[] {
+  const range = reportPeriodRange(query);
+  const sales = operations.filter((operation) => isSaleForAnalytics(operation) && isOperationWithinQuery(operation, query));
+
+  if (mode === "hours") {
+    const points = Array.from({ length: 24 }, (_, hour) => ({
+      label: `${String(hour).padStart(2, "0")}:00`,
+      value: 0,
+    }));
+
+    for (const operation of sales) {
+      const date = operationDate(operation);
+      if (date) points[date.getHours()].value += operation.amount;
+    }
+
+    return points;
+  }
+
+  if (mode === "weeks") {
+    const days = daysInReportRange(query);
+    const weekCount = Math.max(1, Math.ceil(days / 7));
+    const points = Array.from({ length: weekCount }, (_, index) => ({
+      label: `${index + 1} нед.`,
+      value: 0,
+    }));
+
+    for (const operation of sales) {
+      const date = operationDate(operation);
+      if (!date) continue;
+      const index = Math.min(points.length - 1, Math.floor((date.getTime() - range.start.getTime()) / 604_800_000));
+      points[index].value += operation.amount;
+    }
+
+    return points;
+  }
+
+  const days = daysInReportRange(query);
+  const showWeekday = days <= 7;
+  const points = Array.from({ length: days }, (_, index) => {
+    const date = addDays(range.start, index);
+    return { label: formatDayLabel(date, showWeekday), value: 0 };
+  });
+
+  for (const operation of sales) {
+    const date = operationDate(operation);
+    if (!date) continue;
+    const index = Math.floor((startOfDay(date).getTime() - range.start.getTime()) / 86_400_000);
+    if (points[index]) points[index].value += operation.amount;
+  }
+
+  return points;
+}
+
+function chartAxisLabels(points: SalesChartPoint[], mode: SalesChartMode) {
+  if (mode === "hours") return ["00:00", "08:00", "12:00", "16:00", "24:00"];
+  if (points.length <= 14) return points.map((point) => point.label);
+
+  const lastIndex = points.length - 1;
+  return [0, Math.floor(lastIndex / 3), Math.floor((lastIndex * 2) / 3), lastIndex].map((index) => points[index]?.label ?? "");
+}
+
+function SalesChart({ points, mode }: { points: SalesChartPoint[]; mode: SalesChartMode }) {
+  const max = Math.max(1, ...points.map((point) => point.value));
+  const axisLabels = chartAxisLabels(points, mode);
 
   return (
     <div className="chartArea">
       <div className="chartLegend">
         <span className="legendToday">Выручка, ₽</span>
-        <span className="legendYesterday">Вчера</span>
       </div>
-      <div className="bars">
-        {analytics.hourly.map((point) => (
-          <div className="barSlot" key={point.hour}>
-            <span className="yesterdayMark" style={{ height: `${(point.yesterday / max) * 100}%` }} />
-            <span className="todayBar" style={{ height: `${(point.today / max) * 100}%` }} />
+      <div className="bars" style={{ gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))` }}>
+        {points.map((point) => (
+          <div className="barSlot" key={point.label}>
+            <span className="todayBar" style={{ height: `${(point.value / max) * 100}%` }} title={`${point.label}: ${formatMoney(point.value)}`} />
           </div>
         ))}
       </div>
       <div className="chartAxis">
-        <span>00:00</span>
-        <span>08:00</span>
-        <span>12:00</span>
-        <span>16:00</span>
-        <span>24:00</span>
+        {axisLabels.map((label, index) => (
+          <span key={`${label}-${index}`}>{label}</span>
+        ))}
       </div>
     </div>
   );
@@ -846,6 +1070,7 @@ function Donut({ summary }: { summary: DashboardSummary }) {
 function AnalyticsScreen({
   summary,
   analytics,
+  operations,
   query,
   onQueryChange,
   onBack,
@@ -853,14 +1078,23 @@ function AnalyticsScreen({
 }: {
   summary: DashboardSummary;
   analytics: Analytics;
+  operations: Operation[];
   query: ReportQuery;
   onQueryChange: (query: ReportQuery) => void;
   onBack: () => void;
   onRefresh: () => void;
 }) {
-  const [range, setRange] = useState<"hours" | "days" | "weeks">("hours");
-  const [productPeriod, setProductPeriod] = useState<ProductSalesPeriod>("today");
-  const soldItems = analytics.soldItemsByPeriod[productPeriod];
+  const [range, setRange] = useState<SalesChartMode>("hours");
+  const availableModes = useMemo(() => availableSalesChartModes(query), [query]);
+  const activeRange = availableModes.includes(range) ? range : availableModes[0];
+  const chartPoints = useMemo(() => aggregateSalesChart(operations, query, activeRange), [operations, query, activeRange]);
+  const soldItems = useMemo(() => aggregateSoldItems(operations, query), [operations, query]);
+
+  function handleQueryChange(nextQuery: ReportQuery) {
+    const nextModes = availableSalesChartModes(nextQuery);
+    if (!nextModes.includes(range)) setRange(nextModes[0]);
+    onQueryChange(nextQuery);
+  }
 
   return (
     <main className="screen analyticsScreen">
@@ -873,7 +1107,7 @@ function AnalyticsScreen({
           </button>
         }
       />
-      <ReportPeriodControl query={query} onChange={onQueryChange} />
+      <ReportPeriodControl query={query} onChange={handleQueryChange} />
       <div className="shiftPill">
         <span />
         Отчет: {reportTitle(query).replace("Выручка за ", "")}
@@ -892,33 +1126,18 @@ function AnalyticsScreen({
         <div className="sectionHead">
           <h2>Динамика продаж</h2>
           <div className="segmented">
-            <button className={range === "hours" ? "active" : ""} onClick={() => setRange("hours")}>
-              Часы
-            </button>
-            <button className={range === "days" ? "active" : ""} onClick={() => setRange("days")}>
-              Дни
-            </button>
-            <button className={range === "weeks" ? "active" : ""} onClick={() => setRange("weeks")}>
-              Недели
-            </button>
+            {availableModes.map((mode) => (
+              <button key={mode} className={activeRange === mode ? "active" : ""} onClick={() => setRange(mode)}>
+                {chartModeLabels[mode]}
+              </button>
+            ))}
           </div>
         </div>
-        <SalesChart analytics={analytics} />
+        <SalesChart points={chartPoints} mode={activeRange} />
       </section>
       <section className="panel soldProductsPanel">
         <div className="sectionHead">
           <h2>Продано товаров и услуг</h2>
-          <div className="segmented periodSegment">
-            {(Object.keys(productPeriodLabels) as ProductSalesPeriod[]).map((period) => (
-              <button
-                key={period}
-                className={productPeriod === period ? "active" : ""}
-                onClick={() => setProductPeriod(period)}
-              >
-                {productPeriodLabels[period]}
-              </button>
-            ))}
-          </div>
         </div>
         <div className="soldProductsList">
           {soldItems.length > 0 ? (
@@ -976,11 +1195,25 @@ export function App() {
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
   const [selectedOperationDetails, setSelectedOperationDetails] = useState<Operation | null>(null);
   const [isLoading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [reportQueryState, setReportQueryState] = useState<ReportQuery>({ period: "today" });
   const [userName, setUserName] = useState(getSavedUserName() ?? defaultUserName);
 
+  function resetAuthState() {
+    clearSessionToken();
+    setUserName(defaultUserName);
+    setSummary(null);
+    setAnalytics(null);
+    setOperations([]);
+    setSelectedOperationId(null);
+    setSelectedOperationDetails(null);
+    setLoadError("");
+    setView("welcome");
+  }
+
   async function loadData(query = reportQueryState) {
     setLoading(true);
+    setLoadError("");
     try {
       const [summaryData, operationsData, analyticsData] = await Promise.all([
         api.summary(query),
@@ -990,6 +1223,15 @@ export function App() {
       setSummary(summaryData);
       setOperations(operationsData);
       setAnalytics(analyticsData);
+      return true;
+    } catch (error) {
+      if (isUnauthorizedError(error)) {
+        resetAuthState();
+        return false;
+      }
+
+      setLoadError("Не удалось загрузить данные. Проверь соединение и обнови.");
+      return false;
     } finally {
       setLoading(false);
     }
@@ -1001,18 +1243,19 @@ export function App() {
   }
 
   async function openOperation(id: string) {
+    const cachedOperation = operations.find((operation) => operation.id === id) ?? null;
     setSelectedOperationId(id);
-    setSelectedOperationDetails(operations.find((operation) => operation.id === id) ?? null);
+    setSelectedOperationDetails(cachedOperation);
     setView("operation");
 
-    if (!operations.some((operation) => operation.id === id)) {
+    if (!cachedOperation || !isValidReceiptUrl(cachedOperation.fiscalReceiptUrl)) {
       const operation = await api.operation(id).catch(() => null);
       if (operation) setSelectedOperationDetails(operation);
     }
   }
 
   useEffect(() => {
-    if (!hasSessionToken() && !isEnvPreviewMode()) return;
+    if (!hasSessionToken()) return;
     let isMounted = true;
     const deepLinkedOperationId = operationDeepLinkId();
 
@@ -1041,10 +1284,15 @@ export function App() {
         }
         setView("home");
       })
-      .catch(() => {
+      .catch((error) => {
         if (!isMounted) return;
-        clearSessionToken();
-        setView("welcome");
+        if (isUnauthorizedError(error)) {
+          resetAuthState();
+          return;
+        }
+
+        setLoadError("Не удалось загрузить данные. Проверь соединение и обнови.");
+        setView("home");
       });
 
     return () => {
@@ -1077,10 +1325,22 @@ export function App() {
           const displayName = nextUserName ?? defaultUserName;
           setSessionToken(sessionToken, displayName);
           setUserName(displayName);
-          await loadData();
-          setView("home");
+          const isLoaded = await loadData();
+          if (isLoaded || hasSessionToken()) setView("home");
         }}
       />
+    );
+  }
+
+  if (loadError && (!summary || !analytics)) {
+    return (
+      <main className="screen loadingScreen">
+        <RefreshCw />
+        <p>{loadError}</p>
+        <button className="primaryButton" onClick={() => void loadData(reportQueryState)}>
+          Повторить
+        </button>
+      </main>
     );
   }
 
@@ -1119,6 +1379,7 @@ export function App() {
       <AnalyticsScreen
         summary={summary}
         analytics={analytics}
+        operations={operations}
         query={reportQueryState}
         onQueryChange={changeReportQuery}
         onBack={() => setView("home")}
@@ -1148,11 +1409,9 @@ export function App() {
       onOpenOperation={openOperation}
       onAnalytics={() => setView("analytics")}
       onJournal={() => setView("journal")}
-      onLogout={() => {
-        clearSessionToken();
-        setUserName(defaultUserName);
-        setSummary(null);
-        setView("welcome");
+      onLogout={async () => {
+        await api.logout().catch(() => undefined);
+        resetAuthState();
       }}
       onRefresh={() => loadData()}
     />

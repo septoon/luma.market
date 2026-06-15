@@ -43,6 +43,10 @@
     scrollbar-width: none;
   }
 
+  .homeScreen {
+    padding-bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+  }
+
   .screen::-webkit-scrollbar {
     display: none;
   }
@@ -375,12 +379,24 @@
     @apply grid min-h-[66px] w-full grid-cols-[38px_minmax(0,1fr)_42px_auto_16px] items-center gap-2 border-0 border-t border-slate-100 bg-transparent py-3 text-left first:border-t-0 active:bg-slate-50;
   }
 
+  .operationRow.shiftEvent {
+    @apply cursor-default grid-cols-[38px_minmax(0,1fr)_42px_auto] active:bg-transparent;
+  }
+
+  .operationRow:disabled {
+    @apply opacity-100;
+  }
+
   .rowIcon {
     @apply grid size-9 place-items-center rounded-2xl bg-luma-green text-white;
   }
 
   .rowIcon.refund {
     @apply bg-red-500;
+  }
+
+  .rowIcon.shift {
+    @apply bg-slate-100 text-slate-500;
   }
 
   .rowMain strong,
@@ -401,12 +417,30 @@
     @apply whitespace-nowrap text-base font-black;
   }
 
+  .shiftAmount {
+    @apply max-w-32 truncate text-right text-xs text-slate-500;
+  }
+
   .mutedIcon {
     @apply text-slate-300;
   }
 
   .bottomActions {
-    @apply sticky bottom-0 z-10 mt-auto grid shrink-0 grid-cols-3 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-xl shadow-slate-200/80;
+    @apply fixed z-30 grid grid-cols-3 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-xl shadow-slate-200/80;
+    bottom: max(6px, calc(env(safe-area-inset-bottom, 0px) * 0.35));
+    left: 50%;
+    width: min(calc(100% - 2rem), 28rem);
+    transform: translateX(-50%);
+    transition:
+      transform 240ms ease,
+      opacity 180ms ease;
+    will-change: transform;
+  }
+
+  .bottomActions.isHidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%) translateY(calc(115% + env(safe-area-inset-bottom, 0px)));
   }
 
   .bottomActions button {
@@ -468,6 +502,10 @@
   .receiptTotals span:last-of-type,
   .receiptTotals strong:last-child {
     @apply text-lg font-black;
+  }
+
+  .receiptViewButton {
+    @apply inline-flex items-center justify-center gap-2;
   }
 
   .readonlyNotice,

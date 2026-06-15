@@ -45,6 +45,20 @@ export type ReportQuery = {
   date?: string;
 };
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export function isUnauthorizedError(error: unknown) {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
+
 function reportQuery(query: ReportQuery) {
   const params = new URLSearchParams({ period: query.period });
   if (query.date) params.set("date", query.date);
@@ -63,7 +77,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`API error ${response.status}`);
+    throw new ApiError(`API error ${response.status}`, response.status);
   }
 
   return response.json() as Promise<T>;
@@ -79,6 +93,10 @@ export const api = {
     request<AuthSessionResponse>("/auth/select-org", {
       method: "POST",
       body: JSON.stringify({ authId, orgGuid }),
+    }),
+  logout: () =>
+    request<{ ok: true }>("/auth/session", {
+      method: "DELETE",
     }),
   me: () => request<UserProfileResponse>("/me"),
   summary: (query: ReportQuery) => request<DashboardSummary>(`/summary?${reportQuery(query)}`),

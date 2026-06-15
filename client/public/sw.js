@@ -1,7 +1,7 @@
-/* global self, caches, fetch, clients */
+/* global self, caches, fetch, clients, URL */
 
-const CACHE_NAME = "luma-market-v4";
-const APP_SHELL = ["/manifest.webmanifest", "/market.icon.png", "/icons/icon-192.png", "/icons/icon-512.png"];
+const CACHE_NAME = "luma-market-v5";
+const APP_SHELL = ["/manifest.webmanifest", "/market.icon.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
@@ -43,8 +43,8 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(payload.title || fallback.title, {
       body: payload.body || fallback.body,
-      icon: "/icons/icon-192.png",
-      badge: "/icons/icon-192.png",
+      icon: "/market.icon.png",
+      badge: "/market.icon.png",
       tag: payload.tag || "luma-market-sale",
       data: {
         url: payload.url || fallback.url,

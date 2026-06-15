@@ -13,7 +13,7 @@ import {
   notifySaleWebhook,
   savePushSubscription,
 } from "./pushSubscriptions.js";
-import { consumePendingAuth, createPendingAuth, createSession, getSession } from "./sessionStore.js";
+import { consumePendingAuth, createPendingAuth, createSession, deleteSession, getSession } from "./sessionStore.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
@@ -35,8 +35,17 @@ app.use(express.json());
 app.use(morgan("dev"));
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, lifePosConfigured: lifePosClient.isConfigured() });
+  res.json({ ok: true, authRequired: true });
 });
+
+function requireSession(req: express.Request, res: express.Response) {
+  const session = getSession(req.header("X-Luma-Session"));
+  if (!session) {
+    res.status(401).json({ error: "Session is required" });
+    return null;
+  }
+  return session;
+}
 
 app.get("/api/push/public-key", (req, res) => {
   res.json({
@@ -80,12 +89,8 @@ app.delete("/api/push/subscriptions", (req, res, next) => {
 
 app.post("/api/life-pos/notifications/configure", async (req, res, next) => {
   try {
-    const session = getSession(req.header("X-Luma-Session"));
-    const adminSecret = process.env.LUMA_ADMIN_SECRET;
-    if (!session && adminSecret && req.header("X-Luma-Admin-Secret") !== adminSecret) {
-      res.status(401).json({ error: "Invalid admin secret" });
-      return;
-    }
+    const session = requireSession(req, res);
+    if (!session) return;
 
     const schema = z.object({
       primaryUrl: z.string().url().optional(),
@@ -185,9 +190,15 @@ app.post("/api/auth/select-org", async (req, res, next) => {
   }
 });
 
+app.delete("/api/auth/session", (req, res) => {
+  deleteSession(req.header("X-Luma-Session"));
+  res.json({ ok: true });
+});
+
 app.get("/api/me", async (req, res, next) => {
   try {
-    const session = getSession(req.header("X-Luma-Session"));
+    const session = requireSession(req, res);
+    if (!session) return;
     const userName = await lifePosClient.getCurrentUserName(session).catch(() => session?.userName);
     res.json({ userName: userName ?? null });
   } catch (error) {
@@ -197,7 +208,9 @@ app.get("/api/me", async (req, res, next) => {
 
 app.get("/api/summary", async (req, res, next) => {
   try {
-    res.json(await lifePosClient.getSummary(getSession(req.header("X-Luma-Session")), readReportRange(req)));
+    const session = requireSession(req, res);
+    if (!session) return;
+    res.json(await lifePosClient.getSummary(session, readReportRange(req)));
   } catch (error) {
     next(error);
   }
@@ -205,7 +218,9 @@ app.get("/api/summary", async (req, res, next) => {
 
 app.get("/api/operations", async (req, res, next) => {
   try {
-    res.json(await lifePosClient.getOperations(getSession(req.header("X-Luma-Session")), readReportRange(req)));
+    const session = requireSession(req, res);
+    if (!session) return;
+    res.json(await lifePosClient.getOperations(session, readReportRange(req)));
   } catch (error) {
     next(error);
   }
@@ -213,7 +228,9 @@ app.get("/api/operations", async (req, res, next) => {
 
 app.get("/api/operations/:id", async (req, res, next) => {
   try {
-    res.json(await lifePosClient.getOperation(req.params.id, getSession(req.header("X-Luma-Session"))));
+    const session = requireSession(req, res);
+    if (!session) return;
+    res.json(await lifePosClient.getOperation(req.params.id, session));
   } catch (error) {
     next(error);
   }
@@ -221,7 +238,9 @@ app.get("/api/operations/:id", async (req, res, next) => {
 
 app.get("/api/analytics", async (req, res, next) => {
   try {
-    res.json(await lifePosClient.getAnalytics(getSession(req.header("X-Luma-Session")), readReportRange(req)));
+    const session = requireSession(req, res);
+    if (!session) return;
+    res.json(await lifePosClient.getAnalytics(session, readReportRange(req)));
   } catch (error) {
     next(error);
   }

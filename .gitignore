@@ -21,6 +21,7 @@ coverage/
 *.tsbuildinfo
 **/*.tsbuildinfo
 server/data/push-subscriptions.json
+server/data/sessions.json
 
 # OS
 .DS_Store

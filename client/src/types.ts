@@ -1,5 +1,5 @@
-export type PaymentKind = "cash" | "card" | "sbp" | "paid" | "notPaid" | "unknown";
-export type OperationKind = "sale" | "refund";
+export type PaymentKind = "cash" | "card" | "sbp" | "paid" | "notPaid" | "refund" | "cancel" | "unknown";
+export type OperationKind = "sale" | "refund" | "cancel" | "shiftOpen" | "shiftClose" | "unknown";
 export type ProductSalesPeriod = "today" | "yesterday" | "week";
 export type ReportPeriod = "today" | "yesterday" | "week" | "month" | "date";
 export type ShiftStatus = "open" | "closed" | "unknown";
@@ -57,17 +57,21 @@ export type Operation = {
   items: OperationItem[];
   subtotal: number;
   discount: number;
+  rawType?: string;
+  fiscalReceiptUrl?: string;
+  fiscalDocumentGuid?: string;
+  fiscalRegistrarGuid?: string;
 };
 
 export type DashboardSummary = {
   revenue: number;
-  revenueDelta: number;
+  revenueDelta: number | null;
   salesCount: number;
-  salesDelta: number;
+  salesDelta: number | null;
   avgCheck: number;
-  avgCheckDelta: number;
+  avgCheckDelta: number | null;
   avgRefund: number;
-  avgRefundDelta: number;
+  avgRefundDelta: number | null;
   shiftStatus: ShiftStatus;
   shiftOpenedAt: string;
   shiftClosedAt: string | null;
@@ -84,9 +88,9 @@ export type DashboardSummary = {
 
 export type Analytics = {
   refunds: number;
-  refundsDelta: number;
+  refundsDelta: number | null;
   conversion: number;
-  conversionDelta: number;
+  conversionDelta: number | null;
   hourly: Array<{
     hour: string;
     today: number;

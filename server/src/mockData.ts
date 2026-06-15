@@ -2,13 +2,13 @@ import type { Operation } from "./types.js";
 
 export const summary = {
   revenue: 1245860,
-  revenueDelta: 18.6,
+  revenueDelta: null,
   salesCount: 342,
-  salesDelta: 12.4,
+  salesDelta: null,
   avgCheck: 3643,
-  avgCheckDelta: 5.7,
+  avgCheckDelta: null,
   avgRefund: 980,
-  avgRefundDelta: 4.3,
+  avgRefundDelta: null,
   shiftStatus: "open",
   shiftOpenedAt: "16.05.2025, 08:00",
   shiftClosedAt: null,
@@ -113,9 +113,9 @@ export const operations: Operation[] = [
 
 export const analytics = {
   refunds: 15240,
-  refundsDelta: 6.3,
+  refundsDelta: null,
   conversion: 92.7,
-  conversionDelta: 1.8,
+  conversionDelta: null,
   hourly: Array.from({ length: 24 }, (_, index) => {
     const today = [
       0, 0, 0, 0, 0, 8000, 18000, 36000, 62000, 88000, 104000, 118000, 137000, 96000, 128000, 178000, 179000, 83000,

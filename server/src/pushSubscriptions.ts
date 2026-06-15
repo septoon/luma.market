@@ -3,8 +3,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import webPush, { type PushSubscription } from "web-push";
 import { mapSaleToOperation, type LifePosSale } from "./lifePosMapper.js";
-import { lifePosClient } from "./lifePosClient.js";
+import { lifePosClient, mapShiftDocumentToOperation } from "./lifePosClient.js";
 import type { LifePosSession } from "./sessionStore.js";
+import type { Operation } from "./types.js";
 
 type StoredSubscription = {
   subscription: PushSubscription;
@@ -19,8 +20,15 @@ type SaleNotification = {
   sale: LifePosSale;
 };
 
+type ShiftNotification = {
+  id: string;
+  orgGuid?: string;
+  operation?: Operation;
+};
+
 const subscriptions = new Map<string, StoredSubscription>();
 const seenSaleIds = new Set<string>();
+const seenShiftIds = new Set<string>();
 const subscriptionsFile = process.env.PUSH_SUBSCRIPTIONS_FILE
   ? resolve(process.env.PUSH_SUBSCRIPTIONS_FILE)
   : join(dirname(fileURLToPath(import.meta.url)), "../data/push-subscriptions.json");
@@ -45,6 +53,12 @@ function formatPushBody(operation: ReturnType<typeof mapSaleToOperation>) {
   const itemsLine = hiddenCount > 0 ? `${visibleItems.join(", ")} + ещё ${hiddenCount}` : visibleItems.join(", ");
 
   return `${amountLine}\n${itemsLine}`;
+}
+
+function formatShiftPushBody(operation: Operation) {
+  const title = operation.kind === "shiftOpen" ? "Открытие смены" : "Закрытие смены";
+  const parts = [operation.dateTime, operation.cashbox, operation.cashier].filter(Boolean);
+  return parts.length > 0 ? `${title}\n${parts.join(" · ")}` : title;
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -154,17 +168,65 @@ function hasSaleState(payload: LifePosSale) {
   return Boolean(readText(payload.payment_status) || readText(payload.state) || payload.total_sum);
 }
 
+function readNotificationRecord(record: Record<string, unknown>) {
+  return (
+    objectValue(record.sale) ??
+    objectValue(record.deal) ??
+    objectValue(record.document) ??
+    objectValue(record.fiscal_document) ??
+    objectValue(record.fiscalDocument) ??
+    objectValue(record.object) ??
+    objectValue(record.data) ??
+    objectValue(record.payload) ??
+    record
+  );
+}
+
+function shiftSignal(record: Record<string, unknown>) {
+  return [
+    record.fiscal_form,
+    record.fiscal_document_type,
+    record.operation_type,
+    record.type,
+    record.kind,
+    record.event,
+    record.event_type,
+    record.operation,
+    record.name,
+  ]
+    .map(readText)
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function isShiftOpeningSignal(signal: string) {
+  return (
+    signal.includes("shiftopeningreport") ||
+    signal.includes("shift_open") ||
+    signal.includes("shift opening") ||
+    signal.includes("open shift") ||
+    signal.includes("opening shift") ||
+    signal.includes("открытие смен")
+  );
+}
+
+function isShiftClosingSignal(signal: string) {
+  return (
+    signal.includes("shiftclosingreport") ||
+    signal.includes("shift_close") ||
+    signal.includes("shift closing") ||
+    signal.includes("close shift") ||
+    signal.includes("closing shift") ||
+    signal.includes("закрытие смен")
+  );
+}
+
 function normalizeSalePayload(payload: unknown): SaleNotification | null {
   const record = objectValue(payload);
   if (!record || isDeleteNotification(record)) return null;
 
-  const saleRecord =
-    objectValue(record.sale) ??
-    objectValue(record.deal) ??
-    objectValue(record.object) ??
-    objectValue(record.data) ??
-    objectValue(record.payload) ??
-    record;
+  const saleRecord = readNotificationRecord(record);
 
   const id = readGuid(saleRecord);
   if (!id) return null;
@@ -176,6 +238,24 @@ function normalizeSalePayload(payload: unknown): SaleNotification | null {
     id,
     orgGuid: readOrgGuid(record) ?? readOrgGuid(saleRecord),
     sale,
+  };
+}
+
+function normalizeShiftPayload(payload: unknown): ShiftNotification | null {
+  const record = objectValue(payload);
+  if (!record || isDeleteNotification(record)) return null;
+
+  const documentRecord = readNotificationRecord(record);
+  const signal = [shiftSignal(record), shiftSignal(documentRecord)].filter(Boolean).join(" ");
+  if (!isShiftOpeningSignal(signal) && !isShiftClosingSignal(signal)) return null;
+
+  const id = readGuid(documentRecord);
+  if (!id) return null;
+
+  return {
+    id,
+    orgGuid: readOrgGuid(record) ?? readOrgGuid(documentRecord),
+    operation: mapShiftDocumentToOperation(documentRecord) ?? undefined,
   };
 }
 
@@ -218,40 +298,24 @@ export function getPushStatus(session: LifePosSession | null) {
   };
 }
 
-export async function notifySaleWebhook(payload: unknown) {
-  if (!isWebPushConfigured()) return { delivered: 0, skipped: "web-push-not-configured" };
-
-  const notification = normalizeSalePayload(payload);
-  if (!notification) return { delivered: 0, skipped: "not-a-new-paid-sale" };
-  if (seenSaleIds.has(notification.id)) return { delivered: 0, skipped: "sale-already-seen" };
-
-  const enrichedSale = await lifePosClient.getSaleByIdForPush(notification.id, notification.orgGuid);
-  const sale = enrichedSale ?? notification.sale;
-  if (!saleIsPaid(sale) || saleAmount(sale) <= 0) return { delivered: 0, skipped: "not-a-new-paid-sale" };
-
-  seenSaleIds.add(notification.id);
-  const operation = mapSaleToOperation(sale);
-  const targetSubscriptions = [...subscriptions.entries()].filter(
-    ([, item]) => !notification.orgGuid || item.orgGuid === notification.orgGuid,
-  );
-
-  const message = JSON.stringify({
-    title: "Люма.Маркет",
-    body: formatPushBody(operation),
-    url: `/?operation=${encodeURIComponent(operation.id)}`,
-    tag: `sale:${operation.id}`,
-    data: {
-      operationId: operation.id,
-      orgGuid: notification.orgGuid,
-    },
-  });
-
+async function sendPushNotification(
+  orgGuid: string | undefined,
+  message: {
+    title: string;
+    body: string;
+    url: string;
+    tag: string;
+    data: Record<string, unknown>;
+  },
+) {
+  const targetSubscriptions = [...subscriptions.entries()].filter(([, item]) => !orgGuid || item.orgGuid === orgGuid);
   let delivered = 0;
   const staleEndpoints: string[] = [];
+
   await Promise.all(
     targetSubscriptions.map(async ([endpoint, item]) => {
       try {
-        await webPush.sendNotification(item.subscription, message);
+        await webPush.sendNotification(item.subscription, JSON.stringify(message));
         delivered += 1;
       } catch (error) {
         const statusCode =
@@ -267,4 +331,61 @@ export async function notifySaleWebhook(payload: unknown) {
   }
 
   return { delivered };
+}
+
+export async function notifySaleWebhook(payload: unknown) {
+  if (!isWebPushConfigured()) return { delivered: 0, skipped: "web-push-not-configured" };
+
+  const notification = normalizeSalePayload(payload);
+  if (!notification) return { delivered: 0, skipped: "not-a-new-paid-sale" };
+  if (seenSaleIds.has(notification.id)) return { delivered: 0, skipped: "sale-already-seen" };
+
+  const enrichedSale = await lifePosClient.getSaleByIdForPush(notification.id, notification.orgGuid);
+  const sale = enrichedSale ?? notification.sale;
+  if (!saleIsPaid(sale) || saleAmount(sale) <= 0) return { delivered: 0, skipped: "not-a-new-paid-sale" };
+
+  seenSaleIds.add(notification.id);
+  const operation = mapSaleToOperation(sale);
+  return sendPushNotification(notification.orgGuid, {
+    title: "Люма.Маркет",
+    body: formatPushBody(operation),
+    url: `/?operation=${encodeURIComponent(operation.id)}`,
+    tag: `sale:${operation.id}`,
+    data: {
+      operationId: operation.id,
+      orgGuid: notification.orgGuid,
+    },
+  });
+}
+
+export async function notifyShiftWebhook(payload: unknown) {
+  if (!isWebPushConfigured()) return { delivered: 0, skipped: "web-push-not-configured" };
+
+  const notification = normalizeShiftPayload(payload);
+  if (!notification) return { delivered: 0, skipped: "not-a-shift-document" };
+
+  const seenKey = `shift:${notification.id}`;
+  if (seenShiftIds.has(seenKey)) return { delivered: 0, skipped: "shift-already-seen" };
+
+  const operation = notification.operation ?? (await lifePosClient.getShiftOperationByIdForPush(notification.id, notification.orgGuid));
+  if (!operation) return { delivered: 0, skipped: "shift-document-not-found" };
+
+  seenShiftIds.add(seenKey);
+  return sendPushNotification(notification.orgGuid, {
+    title: "Люма.Маркет",
+    body: formatShiftPushBody(operation),
+    url: `/?operation=${encodeURIComponent(operation.id)}`,
+    tag: `shift:${operation.id}`,
+    data: {
+      operationId: operation.id,
+      orgGuid: notification.orgGuid,
+      operationKind: operation.kind,
+    },
+  });
+}
+
+export async function notifyLifePosWebhook(payload: unknown) {
+  const shiftResult = await notifyShiftWebhook(payload);
+  if (!("skipped" in shiftResult) || shiftResult.skipped !== "not-a-shift-document") return shiftResult;
+  return notifySaleWebhook(payload);
 }

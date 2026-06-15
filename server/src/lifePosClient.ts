@@ -136,6 +136,12 @@ function sessionKey(session: LifePosSession) {
   return `session:${session.orgGuid}:${session.lifePosToken.slice(-10)}`;
 }
 
+function addDays(date: Date, days: number) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
 function envLifePosSession(targetOrgGuid?: string): LifePosSession | null {
   const lifePosToken = process.env.LIFE_POS_TOKEN;
   const orgGuid = targetOrgGuid ?? process.env.LIFE_POS_ORG_GUID;
@@ -232,6 +238,26 @@ async function fetchTransactionPaymentMap(session: LifePosSession, range?: Sales
   }
 
   return result;
+}
+
+function salePaymentLookupRange(sale: LifePosSale): SalesFetchRange | undefined {
+  const date = readDate(sale.opened_at) ?? readDate(sale.created_at) ?? readDate(sale.updated_at);
+  if (!date) return undefined;
+
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  return { start, end: addDays(start, 1) };
+}
+
+async function enrichSaleWithPayment(session: LifePosSession, sale: LifePosSale, range?: SalesFetchRange) {
+  const number = readText(sale.number);
+  const paymentBySaleNumber = number ? await fetchTransactionPaymentMap(session, range ?? salePaymentLookupRange(sale)) : new Map();
+  const paymentInfo = number ? paymentBySaleNumber.get(number) : null;
+  if (paymentInfo) return { ...sale, payment_info: paymentInfo };
+  if (readText(sale.payment_status) === "Paid" && moneyValue(sale.total_sum) > 0) {
+    return { ...sale, payment_info: { kind: "cash", label: "Наличные" } satisfies LifePosPaymentInfo };
+  }
+  return sale;
 }
 
 async function fetchFiscalRegistrars(session: LifePosSession) {
@@ -501,6 +527,10 @@ function shiftDocumentToOperation(document: ShiftFiscalDocument): Operation | nu
     ...(readText(document.registrar?.guid) ? { fiscalRegistrarGuid: readText(document.registrar?.guid) ?? undefined } : {}),
     ...(findFiscalReceiptUrl(document) ? { fiscalReceiptUrl: findFiscalReceiptUrl(document) } : {}),
   };
+}
+
+export function mapShiftDocumentToOperation(document: ShiftFiscalDocument): Operation | null {
+  return shiftDocumentToOperation(document);
 }
 
 async function getShiftOperations(session: LifePosSession, range?: ReportRange) {
@@ -947,7 +977,8 @@ export const lifePosClient = {
 
     const sale = await fetchSaleById(session, id).catch(() => null);
     if (sale) {
-      return enrichOperationWithFiscalReceipt(session, mapSaleToOperation(sale), sale);
+      const enrichedSale = await enrichSaleWithPayment(session, sale).catch(() => sale);
+      return enrichOperationWithFiscalReceipt(session, mapSaleToOperation(enrichedSale), enrichedSale);
     }
 
     const sales = await getSalesResponse(session);
@@ -958,7 +989,14 @@ export const lifePosClient = {
   async getSaleByIdForPush(id: string, targetOrgGuid?: string) {
     const session = getSessionByOrgGuid(targetOrgGuid) ?? envLifePosSession(targetOrgGuid);
     if (!session) return null;
-    return fetchSaleById(session, id).catch(() => null);
+    const sale = await fetchSaleById(session, id).catch(() => null);
+    return sale ? enrichSaleWithPayment(session, sale).catch(() => sale) : null;
+  },
+  async getShiftOperationByIdForPush(id: string, targetOrgGuid?: string) {
+    const session = getSessionByOrgGuid(targetOrgGuid) ?? envLifePosSession(targetOrgGuid);
+    if (!session) return null;
+    const shiftDocument = (await getShiftDocuments(session).catch(() => [])).find((document) => readText(document.guid) === id);
+    return shiftDocument ? shiftDocumentToOperation(shiftDocument) : null;
   },
   async getAnalytics(session: LifePosSession, range?: ReportRange) {
     const sales = await getSalesResponse(session, getReportComparisonPeriod(range));

@@ -36,6 +36,8 @@ export type LifePosSale = {
   fiscal_document_type?: unknown;
   receipt_type?: unknown;
   payment_type?: unknown;
+  payment_method?: unknown;
+  paymentMethod?: unknown;
   is_return?: unknown;
   state?: unknown;
   status?: unknown;
@@ -413,6 +415,8 @@ function paymentKind(sale: LifePosSale): PaymentKind {
   if (classification === "refund") return "refund";
   if (classification === "cancel") return "cancel";
   if (sale.payment_info) return sale.payment_info.kind;
+  const inferredPayment = paymentInfoFromPayload(sale);
+  if (inferredPayment) return inferredPayment.kind;
   const status = stringValue(sale.payment_status);
   if (status === "Paid") return "paid";
   if (status === "NotPaid") return "notPaid";
@@ -424,10 +428,35 @@ function paymentLabel(sale: LifePosSale) {
   if (classification === "refund") return "Возврат";
   if (classification === "cancel") return "Отмена";
   if (sale.payment_info) return sale.payment_info.label;
+  const inferredPayment = paymentInfoFromPayload(sale);
+  if (inferredPayment) return inferredPayment.label;
   const status = stringValue(sale.payment_status);
   if (status === "Paid") return "Оплачено";
   if (status === "NotPaid") return "Не оплачено";
   return "Способ оплаты не указан";
+}
+
+function paymentInfoFromPayload(sale: LifePosSale): LifePosPaymentInfo | null {
+  const signals = [
+    sale.payment_type,
+    sale.payment_method,
+    sale.paymentMethod,
+    readPath(sale, ["payment", "type"]),
+    readPath(sale, ["payment", "method"]),
+    readPath(sale, ["paymentMethod", "type"]),
+    readPath(sale, ["paymentMethod", "name"]),
+  ]
+    .map((value) => stringValue(value).toLowerCase())
+    .filter(Boolean);
+
+  if (signalContains(signals, ["cash", "нал"])) return { kind: "cash", label: "Наличные" };
+  if (signalContains(signals, ["sbp", "сбп", "quick-payment"])) return { kind: "sbp", label: "СБП" };
+  if (signalContains(signals, ["qr", "quick", "qrcode", "qr-code", "qr_code"])) return { kind: "sbp", label: "QR" };
+  if (signalContains(signals, ["card", "bank", "acquiring", "terminal", "карта", "эквайр"])) {
+    return { kind: "card", label: "Карта" };
+  }
+
+  return null;
 }
 
 function receiptStatus(sale: LifePosSale): Operation["receiptStatus"] {

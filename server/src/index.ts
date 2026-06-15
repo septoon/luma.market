@@ -10,7 +10,7 @@ import {
   deletePushSubscription,
   getPushStatus,
   getWebPushPublicKey,
-  notifySaleWebhook,
+  notifyLifePosWebhook,
   savePushSubscription,
 } from "./pushSubscriptions.js";
 import { consumePendingAuth, createPendingAuth, createSession, deleteSession, getSession } from "./sessionStore.js";
@@ -119,7 +119,7 @@ async function handleLifePosNotification(req: express.Request, res: express.Resp
     }
 
     lifePosClient.clearSalesCache();
-    const result = await notifySaleWebhook(req.body);
+    const result = await notifyLifePosWebhook(req.body);
     res.json({ ok: true, ...result });
   } catch (error) {
     next(error);

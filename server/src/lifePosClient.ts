@@ -234,7 +234,7 @@ async function fetchFiscalRegistrars(session: LifePosSession) {
   return response.items ?? [];
 }
 
-async function fetchShiftFiscalDocuments(session: LifePosSession, registrarGuid: string) {
+async function fetchShiftFiscalDocuments(session: LifePosSession, registrarGuid: string, fiscalForm: "ShiftOpeningReport" | "ShiftClosingReport") {
   const org = session.orgGuid;
   if (!org) return [];
 
@@ -244,8 +244,7 @@ async function fetchShiftFiscalDocuments(session: LifePosSession, registrarGuid:
     selection: "all",
     items_per_page: "100",
   });
-  query.append("fiscal_form", "ShiftOpeningReport");
-  query.append("fiscal_form", "ShiftClosingReport");
+  query.set("fiscal_form", fiscalForm);
 
   const response = await orgRequest<LifePosFiscalDocumentResponse>(
     session,
@@ -261,7 +260,12 @@ async function fetchShiftDocuments(session: LifePosSession) {
       registrars.map(async (registrar) => {
         const registrarGuid = readText(registrar.guid);
         if (!registrarGuid) return [];
-        const documents = await fetchShiftFiscalDocuments(session, registrarGuid).catch(() => []);
+        const documents = (
+          await Promise.all([
+            fetchShiftFiscalDocuments(session, registrarGuid, "ShiftOpeningReport").catch(() => []),
+            fetchShiftFiscalDocuments(session, registrarGuid, "ShiftClosingReport").catch(() => []),
+          ])
+        ).flat();
         return documents.map((document) => ({ ...document, registrar }) satisfies ShiftFiscalDocument);
       }),
     )

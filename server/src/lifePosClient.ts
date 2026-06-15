@@ -73,6 +73,16 @@ type LifePosFiscalDocument = {
   employee?: unknown;
   operator?: unknown;
   user?: unknown;
+  sources?: {
+    receipt_number?: unknown;
+    total_sum?: unknown;
+    positions?: Array<{
+      name?: unknown;
+      quantity?: unknown;
+      total_price?: unknown;
+      total_sum?: unknown;
+    }>;
+  };
   registrar?: LifePosFiscalRegistrar;
   fiscal_registrar?: LifePosFiscalRegistrar;
   fiscalRegistrar?: LifePosFiscalRegistrar;
@@ -353,11 +363,27 @@ function moneyValue(value: { value?: unknown } | undefined) {
   return typeof value?.value === "number" && Number.isFinite(value.value) ? value.value / 100 : 0;
 }
 
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function centsValue(value: unknown) {
+  const direct = numberValue(value);
+  if (direct !== null) return direct / 100;
+  const money = objectValue(value);
+  const nested = numberValue(money?.value);
+  return nested !== null ? nested / 100 : null;
+}
+
 function readDate(value: unknown) {
   const text = readText(value);
   if (!text) return null;
   const date = new Date(text);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function addMilliseconds(date: Date, milliseconds: number) {
+  return new Date(date.getTime() + milliseconds);
 }
 
 function fiscalDocumentDate(document: LifePosFiscalDocument) {
@@ -572,6 +598,24 @@ async function fetchFiscalReceiptDocument(session: LifePosSession, registrarGuid
   return readFiscalDocumentPayload(payload);
 }
 
+async function fetchFiscalReceiptDocuments(session: LifePosSession, registrarGuid: string, start: Date, end: Date) {
+  const query = new URLSearchParams({
+    presentation: "full",
+    order_by: "issued_at_desc",
+    selection: "all",
+    items_per_page: "100",
+    issued_at_from: start.toISOString(),
+    issued_at_to: end.toISOString(),
+  });
+  query.append("fiscal_form", "Receipt");
+
+  const response = await lifePosSessionRequest<LifePosFiscalDocumentResponse>(
+    session,
+    `/orgs/${session.orgGuid}/fiscal-registrars/${encodeURIComponent(registrarGuid)}/docs?${query.toString()}`,
+  );
+  return response.items ?? [];
+}
+
 async function findFiscalReceiptDocumentByGuid(session: LifePosSession, documentGuid: string) {
   const query = new URLSearchParams({
     presentation: "full",
@@ -584,25 +628,168 @@ async function findFiscalReceiptDocumentByGuid(session: LifePosSession, document
   return readFiscalDocumentItems(payload)[0] ?? null;
 }
 
-async function enrichOperationWithFiscalReceipt(session: LifePosSession, operation: Operation) {
+function saleSearchDates(sale: LifePosSale, operation: Operation) {
+  return [sale.opened_at, sale.created_at, sale.updated_at, operation.openedAt]
+    .map(readDate)
+    .filter((date): date is Date => Boolean(date));
+}
+
+function fiscalReceiptSearchRange(sale: LifePosSale, operation: Operation) {
+  const dates = saleSearchDates(sale, operation);
+  if (dates.length === 0) return null;
+  const timestamps = dates.map((date) => date.getTime());
+  return {
+    start: addMilliseconds(new Date(Math.min(...timestamps)), -10 * 60_000),
+    end: addMilliseconds(new Date(Math.max(...timestamps)), 10 * 60_000),
+  };
+}
+
+function saleWorkplaceSerial(sale: LifePosSale) {
+  return readText(sale.workplace?.name) ?? (typeof sale.workplace?.number === "number" ? String(sale.workplace.number) : null);
+}
+
+function matchingRegistrars(registrars: LifePosFiscalRegistrar[], sale: LifePosSale) {
+  const workplaceSerial = saleWorkplaceSerial(sale);
+  if (!workplaceSerial) return registrars;
+  const matched = registrars.filter((registrar) => {
+    const serial = readText(registrar.serial_number);
+    const name = readText(registrar.name) ?? readText(registrar.title);
+    const number = typeof registrar.number === "number" ? String(registrar.number) : null;
+    return [serial, name, number].some((value) => value === workplaceSerial);
+  });
+  return matched.length > 0 ? matched : registrars;
+}
+
+function fiscalReceiptAmount(document: LifePosFiscalDocument | Record<string, unknown>) {
+  const record = objectValue(document);
+  const sources = objectValue(record?.sources);
+  return (
+    centsValue(sources?.total_sum) ??
+    centsValue(record?.total_sum) ??
+    centsValue(record?.amount) ??
+    centsValue(record?.sum)
+  );
+}
+
+function normalizedName(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function fiscalReceiptPositions(document: LifePosFiscalDocument | Record<string, unknown>) {
+  const record = objectValue(document);
+  const sources = objectValue(record?.sources);
+  const positions = Array.isArray(sources?.positions) ? sources.positions : [];
+  return positions
+    .map((position) => {
+      const item = objectValue(position);
+      if (!item) return null;
+      const name = readText(item.name);
+      if (!name) return null;
+      return {
+        name: normalizedName(name),
+        qty: numberValue(item.quantity) ?? 0,
+        total: centsValue(item.total_price) ?? centsValue(item.total_sum) ?? 0,
+      };
+    })
+    .filter((item): item is { name: string; qty: number; total: number } => Boolean(item));
+}
+
+function scoreFiscalReceiptCandidate(document: LifePosFiscalDocument, operation: Operation) {
+  const documentAmount = fiscalReceiptAmount(document);
+  if (documentAmount === null || Math.abs(documentAmount - operation.amount) > 0.01) return -1;
+  if (readText(document.fiscal_form) !== "Receipt") return -1;
+  if (readText(document.fiscal_status) && readText(document.fiscal_status) !== "Printed") return -1;
+
+  let score = 10;
+  const receiptItems = fiscalReceiptPositions(document);
+  if (operation.items.length === 0 || receiptItems.length === 0) return score;
+
+  for (const item of operation.items) {
+    const expectedName = normalizedName(item.name);
+    const matched = receiptItems.find(
+      (receiptItem) =>
+        receiptItem.name === expectedName &&
+        Math.abs(receiptItem.total - item.total) <= 0.01 &&
+        Math.abs(receiptItem.qty - item.qty) <= 0.0001,
+    );
+    if (matched) score += 5;
+  }
+
+  return score;
+}
+
+function fiscalReceiptNumber(document: Record<string, unknown> | LifePosFiscalDocument) {
+  const record = objectValue(document);
+  const sources = objectValue(record?.sources);
+  const receiptNumber = numberValue(sources?.receipt_number);
+  if (receiptNumber !== null) return String(receiptNumber);
+  const number = numberValue(record?.number);
+  return number !== null ? String(number) : null;
+}
+
+function enrichOperationFromFiscalDocument(operation: Operation, document: Record<string, unknown>, registrarGuid: string) {
+  const fiscalReceiptUrl = findFiscalReceiptUrl(document);
+  const fiscalDocumentGuid = readText(document.guid);
+  const receiptNumber = fiscalReceiptNumber(document);
+  return {
+    ...operation,
+    ...(receiptNumber ? { receiptNumber } : {}),
+    ...(fiscalDocumentGuid ? { fiscalDocumentGuid } : {}),
+    fiscalRegistrarGuid: registrarGuid,
+    ...(fiscalReceiptUrl ? { fiscalReceiptUrl } : {}),
+  };
+}
+
+async function findFiscalReceiptDocumentForSale(session: LifePosSession, sale: LifePosSale, operation: Operation) {
+  const range = fiscalReceiptSearchRange(sale, operation);
+  if (!range) return null;
+
+  const registrars = matchingRegistrars(await fetchFiscalRegistrars(session).catch(() => []), sale);
+  let best: { document: LifePosFiscalDocument; registrarGuid: string; score: number } | null = null;
+
+  for (const registrar of registrars) {
+    const registrarGuid = readText(registrar.guid);
+    if (!registrarGuid) continue;
+    const documents = await fetchFiscalReceiptDocuments(session, registrarGuid, range.start, range.end).catch(() => []);
+    for (const document of documents) {
+      const score = scoreFiscalReceiptCandidate(document, operation);
+      if (score > (best?.score ?? -1)) best = { document: { ...document, registrar }, registrarGuid, score };
+    }
+  }
+
+  if (!best || best.score < 10) return null;
+  const documentGuid = readText(best.document.guid);
+  const fullDocument = documentGuid
+    ? await fetchFiscalReceiptDocument(session, best.registrarGuid, documentGuid).catch(() => null)
+    : null;
+  return {
+    registrarGuid: best.registrarGuid,
+    document: (fullDocument ?? best.document) as Record<string, unknown>,
+  };
+}
+
+async function enrichOperationWithFiscalReceipt(session: LifePosSession, operation: Operation, sale?: LifePosSale | null) {
   if (operation.fiscalReceiptUrl) return operation;
   const documentGuid = operation.fiscalDocumentGuid;
-  if (!documentGuid) return operation;
 
   let registrarGuid = operation.fiscalRegistrarGuid;
   let document: Record<string, unknown> | null = null;
 
-  if (!registrarGuid) {
+  if (documentGuid && !registrarGuid) {
     document = await findFiscalReceiptDocumentByGuid(session, documentGuid).catch(() => null);
     const listUrl = findFiscalReceiptUrl(document);
     if (listUrl) return { ...operation, fiscalReceiptUrl: listUrl };
     registrarGuid = findFiscalRegistrarGuid(document) ?? registrarGuid;
   }
 
-  if (!registrarGuid) return operation;
-  document ??= await fetchFiscalReceiptDocument(session, registrarGuid, documentGuid).catch(() => null);
-  const fiscalReceiptUrl = findFiscalReceiptUrl(document);
-  return fiscalReceiptUrl ? { ...operation, fiscalReceiptUrl, fiscalRegistrarGuid: registrarGuid } : operation;
+  if (documentGuid && registrarGuid) {
+    document ??= await fetchFiscalReceiptDocument(session, registrarGuid, documentGuid).catch(() => null);
+    if (document) return enrichOperationFromFiscalDocument(operation, document, registrarGuid);
+  }
+
+  if (!sale) return operation;
+  const matched = await findFiscalReceiptDocumentForSale(session, sale, operation).catch(() => null);
+  return matched ? enrichOperationFromFiscalDocument(operation, matched.document, matched.registrarGuid) : operation;
 }
 
 function readCurrentEmployeeName(payload: unknown): string | undefined {
@@ -727,7 +914,7 @@ export const lifePosClient = {
   async getOperation(id: string, session: LifePosSession) {
     const sale = await fetchSaleById(session, id).catch(() => null);
     if (sale) {
-      return enrichOperationWithFiscalReceipt(session, mapSaleToOperation(sale));
+      return enrichOperationWithFiscalReceipt(session, mapSaleToOperation(sale), sale);
     }
 
     const sales = await getSalesResponse(session);

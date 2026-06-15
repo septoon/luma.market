@@ -595,7 +595,7 @@ function OperationRow({ operation, onOpen }: { operation: Operation; onOpen: () 
               : "Продажа";
 
   return (
-    <button className={isShiftEvent ? "operationRow shiftEvent" : "operationRow"} onClick={onOpen} disabled={isShiftEvent}>
+    <button className={isShiftEvent ? "operationRow shiftEvent" : "operationRow"} onClick={onOpen}>
       <span className={isRefund ? "rowIcon refund" : isShiftEvent ? "rowIcon shift" : "rowIcon"}>
         {isRefund ? <RotateCcw size={18} /> : isShiftEvent ? <Clock3 size={18} /> : <Receipt size={18} />}
       </span>
@@ -607,14 +607,12 @@ function OperationRow({ operation, onOpen }: { operation: Operation; onOpen: () 
       <span className="rowTime">{operation.time}</span>
       {isShiftEvent ? <strong className="amount shiftAmount">{operation.cashbox}</strong> : null}
       {!isShiftEvent ? (
-        <>
-          <strong className={isRefund ? "amount refundText" : "amount"}>
-            {isRefund ? "− " : ""}
-            {formatMoney(Math.abs(operation.amount))}
-          </strong>
-          <ChevronRight size={18} className="mutedIcon" />
-        </>
+        <strong className={isRefund ? "amount refundText" : "amount"}>
+          {isRefund ? "− " : ""}
+          {formatMoney(Math.abs(operation.amount))}
+        </strong>
       ) : null}
+      <ChevronRight size={18} className="mutedIcon" />
     </button>
   );
 }
@@ -838,8 +836,15 @@ function JournalScreen({
 }
 
 function OperationScreen({ operation, onBack }: { operation: Operation; onBack: () => void }) {
-  const statusLabel =
-    operation.receiptStatus === "sent" ? "Чек отправлен" : operation.receiptStatus === "failed" ? "Ошибка чека" : "Чек ожидает данных";
+  const isShiftEvent = operation.kind === "shiftOpen" || operation.kind === "shiftClose";
+  const shiftTitle = operation.kind === "shiftOpen" ? "Открытие смены" : operation.kind === "shiftClose" ? "Закрытие смены" : "";
+  const statusLabel = isShiftEvent
+    ? "Документ сформирован"
+    : operation.receiptStatus === "sent"
+      ? "Чек отправлен"
+      : operation.receiptStatus === "failed"
+        ? "Ошибка чека"
+        : "Чек ожидает данных";
   const signedAmount = operation.kind === "refund" || operation.kind === "cancel" ? `− ${formatMoney(operation.amount)}` : formatMoney(operation.amount);
   const receiptUrl = isValidReceiptUrl(operation.fiscalReceiptUrl) ? operation.fiscalReceiptUrl : undefined;
 
@@ -855,41 +860,44 @@ function OperationScreen({ operation, onBack }: { operation: Operation; onBack: 
         }
       />
       <section className="operationAmount panel">
-        <span>Сумма операции</span>
+        <span>{isShiftEvent ? "Фискальный документ" : "Сумма операции"}</span>
         <div>
-          <h1>{signedAmount}</h1>
+          <h1>{isShiftEvent ? shiftTitle : signedAmount}</h1>
           <strong className={operation.receiptStatus === "failed" ? "statusBadge statusBad" : "statusBadge"}>
             {statusLabel} <Check size={16} />
           </strong>
         </div>
       </section>
       <section className="panel infoList">
-        <InfoLine icon={<CreditCard size={18} />} label="Способ оплаты" value={operation.paymentLabel} />
+        {isShiftEvent ? <InfoLine icon={<FileText size={18} />} label="Тип документа" value={shiftTitle} /> : null}
+        {!isShiftEvent ? <InfoLine icon={<CreditCard size={18} />} label="Способ оплаты" value={operation.paymentLabel} /> : null}
         <InfoLine icon={<Store size={18} />} label="Касса" value={operation.cashbox} />
         <InfoLine icon={<UserRound size={18} />} label="Кассир" value={operation.cashier} />
         <InfoLine icon={<Clock3 size={18} />} label="Дата и время" value={operation.dateTime} />
         <InfoLine icon={<WalletCards size={18} />} label="Номер операции" value={`№ ${operation.number}`} />
-        <InfoLine icon={<Receipt size={18} />} label="Номер чека" value={`№ ${operation.receiptNumber}`} />
+        <InfoLine icon={<Receipt size={18} />} label={isShiftEvent ? "Номер фискального документа" : "Номер чека"} value={`№ ${operation.receiptNumber}`} />
       </section>
-      <section className="panel receiptPanel">
-        <h2>Состав покупки</h2>
-        {operation.items.map((item) => (
-          <div className="receiptLine" key={item.name}>
-            <span>{item.name}</span>
-            <small>{item.qty} шт</small>
-            <small>{formatMoney(item.unitPrice)}</small>
-            <strong>{formatMoney(item.total)}</strong>
+      {!isShiftEvent ? (
+        <section className="panel receiptPanel">
+          <h2>Состав покупки</h2>
+          {operation.items.map((item) => (
+            <div className="receiptLine" key={item.name}>
+              <span>{item.name}</span>
+              <small>{item.qty} шт</small>
+              <small>{formatMoney(item.unitPrice)}</small>
+              <strong>{formatMoney(item.total)}</strong>
+            </div>
+          ))}
+          <div className="receiptTotals">
+            <span>Подытог</span>
+            <strong>{formatMoney(operation.subtotal)}</strong>
+            <span>Скидка</span>
+            <strong className="refundText">− {formatMoney(operation.discount)}</strong>
+            <span>Итого</span>
+            <strong>{formatMoney(operation.amount)}</strong>
           </div>
-        ))}
-        <div className="receiptTotals">
-          <span>Подытог</span>
-          <strong>{formatMoney(operation.subtotal)}</strong>
-          <span>Скидка</span>
-          <strong className="refundText">− {formatMoney(operation.discount)}</strong>
-          <span>Итого</span>
-          <strong>{formatMoney(operation.amount)}</strong>
-        </div>
-      </section>
+        </section>
+      ) : null}
       {receiptUrl ? (
         <button className="primaryButton receiptViewButton" onClick={() => window.open(receiptUrl, "_blank", "noopener,noreferrer")}>
           🧾 Просмотреть чек
@@ -1244,11 +1252,15 @@ export function App() {
 
   async function openOperation(id: string) {
     const cachedOperation = operations.find((operation) => operation.id === id) ?? null;
+    const shouldFetchDetails =
+      !cachedOperation ||
+      ((cachedOperation.kind === "sale" || cachedOperation.kind === "refund" || cachedOperation.kind === "cancel") &&
+        !isValidReceiptUrl(cachedOperation.fiscalReceiptUrl));
     setSelectedOperationId(id);
     setSelectedOperationDetails(cachedOperation);
     setView("operation");
 
-    if (!cachedOperation || !isValidReceiptUrl(cachedOperation.fiscalReceiptUrl)) {
+    if (shouldFetchDetails) {
       const operation = await api.operation(id).catch(() => null);
       if (operation) setSelectedOperationDetails(operation);
     }

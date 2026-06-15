@@ -432,6 +432,15 @@ function shiftDocumentKind(document: LifePosFiscalDocument): Operation["kind"] |
   return null;
 }
 
+function fiscalDocumentNumber(document: LifePosFiscalDocument | Record<string, unknown>) {
+  const record = objectValue(document);
+  const sources = objectValue(record?.sources);
+  const receiptNumber = numberValue(sources?.receipt_number);
+  if (receiptNumber !== null) return String(receiptNumber);
+  const number = numberValue(record?.number);
+  return number !== null ? String(number) : "нет данных";
+}
+
 function formatTime(date: Date | null) {
   if (!date) return "--:--";
   return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
@@ -457,7 +466,7 @@ function shiftDocumentToOperation(document: ShiftFiscalDocument): Operation | nu
   return {
     id: readText(document.guid) ?? `${kind}-${date.toISOString()}`,
     number: kind === "shiftOpen" ? "открытие смены" : "закрытие смены",
-    receiptNumber: "нет данных",
+    receiptNumber: fiscalDocumentNumber(document),
     kind,
     amount: 0,
     time: formatTime(date),
@@ -471,6 +480,10 @@ function shiftDocumentToOperation(document: ShiftFiscalDocument): Operation | nu
     items: [],
     subtotal: 0,
     discount: 0,
+    rawType: [readText(document.fiscal_form), readText(document.fiscal_status) ?? readText(document.status)].filter(Boolean).join(" · "),
+    ...(readText(document.guid) ? { fiscalDocumentGuid: readText(document.guid) ?? undefined } : {}),
+    ...(readText(document.registrar?.guid) ? { fiscalRegistrarGuid: readText(document.registrar?.guid) ?? undefined } : {}),
+    ...(findFiscalReceiptUrl(document) ? { fiscalReceiptUrl: findFiscalReceiptUrl(document) } : {}),
   };
 }
 
@@ -912,6 +925,10 @@ export const lifePosClient = {
     );
   },
   async getOperation(id: string, session: LifePosSession) {
+    const shiftDocument = (await getShiftDocuments(session).catch(() => [])).find((document) => readText(document.guid) === id);
+    const shiftOperation = shiftDocument ? shiftDocumentToOperation(shiftDocument) : null;
+    if (shiftOperation) return shiftOperation;
+
     const sale = await fetchSaleById(session, id).catch(() => null);
     if (sale) {
       return enrichOperationWithFiscalReceipt(session, mapSaleToOperation(sale), sale);

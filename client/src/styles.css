@@ -380,7 +380,7 @@
   }
 
   .operationRow.shiftEvent {
-    @apply cursor-default grid-cols-[38px_minmax(0,1fr)_42px_auto] active:bg-transparent;
+    @apply grid-cols-[38px_minmax(0,1fr)_42px_auto_16px];
   }
 
   .operationRow:disabled {

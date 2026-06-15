@@ -150,6 +150,10 @@ function saleIsPaid(sale: LifePosSale) {
   return readText(sale.payment_status) === "Paid" || readText(sale.state) === "Completed";
 }
 
+function hasSaleState(payload: LifePosSale) {
+  return Boolean(readText(payload.payment_status) || readText(payload.state) || payload.total_sum);
+}
+
 function normalizeSalePayload(payload: unknown): SaleNotification | null {
   const record = objectValue(payload);
   if (!record || isDeleteNotification(record)) return null;
@@ -166,7 +170,7 @@ function normalizeSalePayload(payload: unknown): SaleNotification | null {
   if (!id) return null;
 
   const sale = saleRecord as LifePosSale;
-  if (!saleIsPaid(sale) || saleAmount(sale) <= 0) return null;
+  if (hasSaleState(sale) && (!saleIsPaid(sale) || saleAmount(sale) <= 0)) return null;
 
   return {
     id,
@@ -220,10 +224,13 @@ export async function notifySaleWebhook(payload: unknown) {
   const notification = normalizeSalePayload(payload);
   if (!notification) return { delivered: 0, skipped: "not-a-new-paid-sale" };
   if (seenSaleIds.has(notification.id)) return { delivered: 0, skipped: "sale-already-seen" };
-  seenSaleIds.add(notification.id);
 
   const enrichedSale = await lifePosClient.getSaleByIdForPush(notification.id, notification.orgGuid);
-  const operation = mapSaleToOperation(enrichedSale ?? notification.sale);
+  const sale = enrichedSale ?? notification.sale;
+  if (!saleIsPaid(sale) || saleAmount(sale) <= 0) return { delivered: 0, skipped: "not-a-new-paid-sale" };
+
+  seenSaleIds.add(notification.id);
+  const operation = mapSaleToOperation(sale);
   const targetSubscriptions = [...subscriptions.entries()].filter(
     ([, item]) => !notification.orgGuid || item.orgGuid === notification.orgGuid,
   );

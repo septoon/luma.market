@@ -11,7 +11,7 @@ import {
   type LifePosPaymentInfo,
   type LifePosSalesResponse,
 } from "./lifePosMapper.js";
-import type { LifePosOrganization, LifePosSession } from "./sessionStore.js";
+import { getSessionByOrgGuid, type LifePosOrganization, type LifePosSession } from "./sessionStore.js";
 import type { DashboardSummary, Operation, ReportRange, ShiftStatus } from "./types.js";
 
 const apiBase = process.env.LIFE_POS_API_BASE ?? "https://api.life-pos.ru";
@@ -134,6 +134,18 @@ async function lifePosTokenRequest<T>(token: string, path: string, init?: Reques
 
 function sessionKey(session: LifePosSession) {
   return `session:${session.orgGuid}:${session.lifePosToken.slice(-10)}`;
+}
+
+function envLifePosSession(targetOrgGuid?: string): LifePosSession | null {
+  const lifePosToken = process.env.LIFE_POS_TOKEN;
+  const orgGuid = targetOrgGuid ?? process.env.LIFE_POS_ORG_GUID;
+  if (!lifePosToken || !orgGuid) return null;
+  return {
+    lifePosToken,
+    orgGuid,
+    orgName: orgGuid,
+    createdAt: Date.now(),
+  };
 }
 
 function resolveSalesFetchRange(range?: SalesFetchRange) {
@@ -943,8 +955,10 @@ export const lifePosClient = {
     const operation = mapped.find((item) => item.id === id) ?? mapped[0];
     return operation ? enrichOperationWithFiscalReceipt(session, operation) : operation;
   },
-  async getSaleByIdForPush(_id: string, _targetOrgGuid?: string) {
-    return null;
+  async getSaleByIdForPush(id: string, targetOrgGuid?: string) {
+    const session = getSessionByOrgGuid(targetOrgGuid) ?? envLifePosSession(targetOrgGuid);
+    if (!session) return null;
+    return fetchSaleById(session, id).catch(() => null);
   },
   async getAnalytics(session: LifePosSession, range?: ReportRange) {
     const sales = await getSalesResponse(session, getReportComparisonPeriod(range));

@@ -250,7 +250,8 @@
   }
 
   .operationAmount h1 {
-    @apply m-0 mt-3 break-words text-[44px] font-black leading-none tracking-[-0.05em];
+    @apply m-0 mt-3 break-words font-black leading-none tracking-[-0.04em];
+    font-size: clamp(34px, 9vw, 38px);
   }
 
   .deltaPill {
@@ -708,6 +709,6 @@
   }
 
   .operationAmount h1 {
-    font-size: 40px;
+    font-size: 34px;
   }
 }

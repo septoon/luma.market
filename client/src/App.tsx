@@ -859,7 +859,7 @@ function OperationScreen({ operation, onBack }: { operation: Operation; onBack: 
           </button>
         }
       />
-      <section className="operationAmount panel">
+      <section className={isShiftEvent ? "operationAmount shiftDocumentAmount panel" : "operationAmount panel"}>
         <span>{isShiftEvent ? "Фискальный документ" : "Сумма операции"}</span>
         <div>
           <h1>{isShiftEvent ? shiftTitle : signedAmount}</h1>

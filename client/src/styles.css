@@ -463,6 +463,16 @@
     @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-2xl bg-emerald-400/15 px-3 py-2 text-sm font-black text-emerald-300;
   }
 
+  .shiftDocumentAmount h1 {
+    @apply tracking-[-0.04em];
+    font-size: clamp(30px, 8.5vw, 34px);
+    line-height: 0.98;
+  }
+
+  .shiftDocumentAmount .statusBadge {
+    @apply px-2.5 py-2 text-xs;
+  }
+
   .statusBad {
     @apply bg-red-100 text-red-600;
   }

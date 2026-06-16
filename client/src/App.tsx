@@ -167,6 +167,22 @@ function supportsPushNotifications() {
   return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
 
+async function getServiceWorkerRegistration() {
+  const existing = await navigator.serviceWorker.getRegistration("/");
+  if (existing) {
+    existing.update().catch(() => undefined);
+    return existing;
+  }
+  return navigator.serviceWorker.register("/sw.js");
+}
+
+function pushRecoveryMessage(state: NotificationState) {
+  if (state === "unsupported") return "Откройте установленное приложение с экрана Домой";
+  if (state === "denied") return "Разрешите уведомления в iOS или переустановите PWA";
+  if (state === "error") return "Повторить включение";
+  return null;
+}
+
 function NotificationButton() {
   const [state, setState] = useState<NotificationState>("loading");
   const [message, setMessage] = useState<string | null>(null);
@@ -191,10 +207,11 @@ function NotificationButton() {
         if (Notification.permission === "denied") {
           if (!isMounted) return;
           setState("denied");
+          setMessage(pushRecoveryMessage("denied"));
           return;
         }
 
-        const registration = await navigator.serviceWorker.ready;
+        const registration = await getServiceWorkerRegistration();
         const subscription = await registration.pushManager.getSubscription();
         if (!isMounted) return;
 
@@ -206,7 +223,10 @@ function NotificationButton() {
 
         setState("ready");
       } catch {
-        if (isMounted) setState("error");
+        if (isMounted) {
+          setState("error");
+          setMessage(pushRecoveryMessage("error"));
+        }
       }
     }
 
@@ -217,7 +237,11 @@ function NotificationButton() {
   }, []);
 
   async function enableNotifications() {
-    if (!supportsPushNotifications()) return;
+    if (!supportsPushNotifications()) {
+      setState("unsupported");
+      setMessage(pushRecoveryMessage("unsupported"));
+      return;
+    }
     setState("loading");
     setMessage(null);
 
@@ -231,10 +255,11 @@ function NotificationButton() {
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
         setState(permission === "denied" ? "denied" : "ready");
+        setMessage(permission === "denied" ? pushRecoveryMessage("denied") : "Разрешение не выдано");
         return;
       }
 
-      const registration = await navigator.serviceWorker.ready;
+      const registration = await getServiceWorkerRegistration();
       const existing = await registration.pushManager.getSubscription();
       const subscription =
         existing ??
@@ -258,7 +283,7 @@ function NotificationButton() {
     setMessage(null);
 
     try {
-      const registration = await navigator.serviceWorker.ready;
+      const registration = await getServiceWorkerRegistration();
       const subscription = await registration.pushManager.getSubscription();
       if (subscription) {
         await api.deletePushSubscription(subscription.endpoint);
@@ -271,7 +296,7 @@ function NotificationButton() {
     }
   }
 
-  const disabled = state === "loading" || state === "unsupported" || state === "unconfigured" || state === "denied";
+  const disabled = state === "loading" || state === "unconfigured";
   const label =
     state === "enabled"
       ? "Уведомления включены"
@@ -289,7 +314,7 @@ function NotificationButton() {
       onClick={state === "enabled" ? disableNotifications : enableNotifications}
       disabled={disabled}
       aria-label={label}
-      title={message ?? label}
+      title={message ?? pushRecoveryMessage(state) ?? label}
     >
       {state === "enabled" ? <Check size={17} /> : <Bell size={17} />}
       <span>{state === "enabled" ? "Push" : "Push"}</span>

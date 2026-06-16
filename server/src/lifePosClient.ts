@@ -17,6 +17,7 @@ import type { DashboardSummary, Operation, ReportRange, ShiftStatus } from "./ty
 const apiBase = process.env.LIFE_POS_API_BASE ?? "https://api.life-pos.ru";
 const clientId = process.env.LIFE_POS_CLIENT_ID ?? "726f79ad-5af6-4eae-bbd4-66f84313cd35";
 const cacheTtlMs = 15_000;
+const pushFallbackSaleWindowMs = 30 * 60_000;
 const salesCache = new Map<string, { expiresAt: number; response: LifePosSalesResponse }>();
 const shiftDocumentsCache = new Map<string, { expiresAt: number; promise: Promise<ShiftFiscalDocument[]> }>();
 
@@ -991,6 +992,20 @@ export const lifePosClient = {
     if (!session) return null;
     const sale = await fetchSaleById(session, id).catch(() => null);
     return sale ? enrichSaleWithPayment(session, sale).catch(() => sale) : null;
+  },
+  async getRecentSaleForPush(targetOrgGuid?: string) {
+    const session = getSessionByOrgGuid(targetOrgGuid) ?? envLifePosSession(targetOrgGuid);
+    if (!session) return null;
+
+    const end = addMilliseconds(new Date(), 2 * 60_000);
+    const start = addMilliseconds(end, -pushFallbackSaleWindowMs);
+    const sales = await getSalesResponse(session, { start, end }).catch(() => null);
+    const sale =
+      sales?.items?.find((item) => {
+        const operation = mapSaleToOperation(item);
+        return operation.kind === "sale" && operation.amount > 0;
+      }) ?? null;
+    return sale ? enrichSaleWithPayment(session, sale, { start, end }).catch(() => sale) : null;
   },
   async getShiftOperationByIdForPush(id: string, targetOrgGuid?: string) {
     const session = getSessionByOrgGuid(targetOrgGuid) ?? envLifePosSession(targetOrgGuid);

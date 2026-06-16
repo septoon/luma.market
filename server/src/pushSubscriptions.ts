@@ -241,6 +241,13 @@ function normalizeSalePayload(payload: unknown): SaleNotification | null {
   };
 }
 
+function readPayloadOrgGuid(payload: unknown) {
+  const record = objectValue(payload);
+  if (!record) return undefined;
+  const nested = readNotificationRecord(record);
+  return readOrgGuid(record) ?? readOrgGuid(nested);
+}
+
 function normalizeShiftPayload(payload: unknown): ShiftNotification | null {
   const record = objectValue(payload);
   if (!record || isDeleteNotification(record)) return null;
@@ -337,23 +344,27 @@ export async function notifySaleWebhook(payload: unknown) {
   if (!isWebPushConfigured()) return { delivered: 0, skipped: "web-push-not-configured" };
 
   const notification = normalizeSalePayload(payload);
-  if (!notification) return { delivered: 0, skipped: "not-a-new-paid-sale" };
-  if (seenSaleIds.has(notification.id)) return { delivered: 0, skipped: "sale-already-seen" };
+  const orgGuid = notification?.orgGuid ?? readPayloadOrgGuid(payload);
 
-  const enrichedSale = await lifePosClient.getSaleByIdForPush(notification.id, notification.orgGuid);
-  const sale = enrichedSale ?? notification.sale;
-  if (!saleIsPaid(sale) || saleAmount(sale) <= 0) return { delivered: 0, skipped: "not-a-new-paid-sale" };
+  const enrichedSale = notification ? await lifePosClient.getSaleByIdForPush(notification.id, orgGuid) : null;
+  let sale = enrichedSale ?? notification?.sale ?? null;
+  if (!sale || !saleIsPaid(sale) || saleAmount(sale) <= 0) {
+    sale = await lifePosClient.getRecentSaleForPush(orgGuid);
+  }
+  if (!sale || !saleIsPaid(sale) || saleAmount(sale) <= 0) return { delivered: 0, skipped: "not-a-new-paid-sale" };
 
-  seenSaleIds.add(notification.id);
   const operation = mapSaleToOperation(sale);
-  return sendPushNotification(notification.orgGuid, {
+  if (seenSaleIds.has(operation.id)) return { delivered: 0, skipped: "sale-already-seen" };
+
+  seenSaleIds.add(operation.id);
+  return sendPushNotification(orgGuid, {
     title: "Люма.Маркет",
     body: formatPushBody(operation),
     url: `/?operation=${encodeURIComponent(operation.id)}`,
     tag: `sale:${operation.id}`,
     data: {
       operationId: operation.id,
-      orgGuid: notification.orgGuid,
+      orgGuid,
     },
   });
 }

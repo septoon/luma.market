@@ -306,7 +306,7 @@ export function getPushStatus(session: LifePosSession | null) {
 }
 
 async function sendPushNotification(
-  orgGuid: string | undefined,
+  orgGuid: string,
   message: {
     title: string;
     body: string;
@@ -315,7 +315,7 @@ async function sendPushNotification(
     data: Record<string, unknown>;
   },
 ) {
-  const targetSubscriptions = [...subscriptions.entries()].filter(([, item]) => !orgGuid || item.orgGuid === orgGuid);
+  const targetSubscriptions = [...subscriptions.entries()].filter(([, item]) => item.orgGuid === orgGuid);
   let delivered = 0;
   const staleEndpoints: string[] = [];
 
@@ -345,6 +345,7 @@ export async function notifySaleWebhook(payload: unknown) {
 
   const notification = normalizeSalePayload(payload);
   const orgGuid = notification?.orgGuid ?? readPayloadOrgGuid(payload);
+  if (!orgGuid) return { delivered: 0, skipped: "missing-org-guid" };
 
   const enrichedSale = notification ? await lifePosClient.getSaleByIdForPush(notification.id, orgGuid) : null;
   let sale = enrichedSale ?? notification?.sale ?? null;
@@ -374,6 +375,7 @@ export async function notifyShiftWebhook(payload: unknown) {
 
   const notification = normalizeShiftPayload(payload);
   if (!notification) return { delivered: 0, skipped: "not-a-shift-document" };
+  if (!notification.orgGuid) return { delivered: 0, skipped: "missing-org-guid" };
 
   const seenKey = `shift:${notification.id}`;
   if (seenShiftIds.has(seenKey)) return { delivered: 0, skipped: "shift-already-seen" };

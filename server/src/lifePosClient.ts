@@ -143,18 +143,6 @@ function addDays(date: Date, days: number) {
   return result;
 }
 
-function envLifePosSession(targetOrgGuid?: string): LifePosSession | null {
-  const lifePosToken = process.env.LIFE_POS_TOKEN;
-  const orgGuid = targetOrgGuid ?? process.env.LIFE_POS_ORG_GUID;
-  if (!lifePosToken || !orgGuid) return null;
-  return {
-    lifePosToken,
-    orgGuid,
-    orgName: orgGuid,
-    createdAt: Date.now(),
-  };
-}
-
 function resolveSalesFetchRange(range?: SalesFetchRange) {
   if (!range) return null;
   if ("start" in range) return range;
@@ -988,13 +976,13 @@ export const lifePosClient = {
     return operation ? enrichOperationWithFiscalReceipt(session, operation) : operation;
   },
   async getSaleByIdForPush(id: string, targetOrgGuid?: string) {
-    const session = getSessionByOrgGuid(targetOrgGuid) ?? envLifePosSession(targetOrgGuid);
+    const session = getSessionByOrgGuid(targetOrgGuid);
     if (!session) return null;
     const sale = await fetchSaleById(session, id).catch(() => null);
     return sale ? enrichSaleWithPayment(session, sale).catch(() => sale) : null;
   },
   async getRecentSaleForPush(targetOrgGuid?: string) {
-    const session = getSessionByOrgGuid(targetOrgGuid) ?? envLifePosSession(targetOrgGuid);
+    const session = getSessionByOrgGuid(targetOrgGuid);
     if (!session) return null;
 
     const end = addMilliseconds(new Date(), 2 * 60_000);
@@ -1008,7 +996,7 @@ export const lifePosClient = {
     return sale ? enrichSaleWithPayment(session, sale, { start, end }).catch(() => sale) : null;
   },
   async getShiftOperationByIdForPush(id: string, targetOrgGuid?: string) {
-    const session = getSessionByOrgGuid(targetOrgGuid) ?? envLifePosSession(targetOrgGuid);
+    const session = getSessionByOrgGuid(targetOrgGuid);
     if (!session) return null;
     const shiftDocument = (await getShiftDocuments(session).catch(() => [])).find((document) => readText(document.guid) === id);
     return shiftDocument ? shiftDocumentToOperation(shiftDocument) : null;

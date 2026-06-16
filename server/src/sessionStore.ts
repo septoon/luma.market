@@ -144,8 +144,9 @@ export function getSession(sessionToken: string | undefined) {
 
 export function getSessionByOrgGuid(orgGuid: string | undefined) {
   cleanup();
+  if (!orgGuid) return null;
   const candidates = [...sessions.values()]
-    .filter((session) => !orgGuid || session.orgGuid === orgGuid)
+    .filter((session) => session.orgGuid === orgGuid)
     .sort((a, b) => (b.lastAccessedAt ?? b.createdAt) - (a.lastAccessedAt ?? a.createdAt));
   return candidates[0] ?? null;
 }

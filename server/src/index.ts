@@ -55,12 +55,21 @@ function requireSession(req: express.Request, res: express.Response) {
 }
 
 async function configureLifePosNotificationsForSession(session: LifePosSession, context: string) {
-  const notificationsUrl = process.env.LIFE_POS_NOTIFICATIONS_URL;
+  const notificationsUrl = lifePosNotificationsUrl(session);
   if (!notificationsUrl) return;
 
   await lifePosClient.configureOperationNotifications(session, notificationsUrl).catch((error) => {
     console.warn(`Failed to configure LIFE POS notifications after ${context}`, error);
   });
+}
+
+function lifePosNotificationsUrl(session: LifePosSession) {
+  const baseUrl = process.env.LIFE_POS_NOTIFICATIONS_URL;
+  if (!baseUrl) return null;
+
+  const url = new URL(baseUrl);
+  url.pathname = `${url.pathname.replace(/\/$/, "")}/${encodeURIComponent(session.orgGuid)}`;
+  return url.toString();
 }
 
 app.get("/api/push/public-key", (req, res) => {
@@ -114,7 +123,7 @@ app.post("/api/life-pos/notifications/configure", async (req, res, next) => {
       secondaryUrl: z.string().url().optional(),
     });
     const { primaryUrl, secondaryUrl } = schema.parse(req.body ?? {});
-    const url = primaryUrl ?? process.env.LIFE_POS_NOTIFICATIONS_URL;
+    const url = primaryUrl ?? lifePosNotificationsUrl(session);
     if (!url) {
       res.status(400).json({ error: "LIFE_POS_NOTIFICATIONS_URL or primaryUrl is required" });
       return;
@@ -136,7 +145,11 @@ async function handleLifePosNotification(req: express.Request, res: express.Resp
     }
 
     lifePosClient.clearSalesCache();
-    const result = await notifyLifePosWebhook(req.body);
+    const payload =
+      req.params.orgGuid && req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? { ...req.body, org_guid: req.params.orgGuid }
+        : req.body;
+    const result = await notifyLifePosWebhook(payload);
     console.log("LIFE POS notification processed", result);
     res.json({ ok: true, ...result });
   } catch (error) {
@@ -146,6 +159,7 @@ async function handleLifePosNotification(req: express.Request, res: express.Resp
 
 app.post("/api/life-pos/notifications", handleLifePosNotification);
 app.post("/api/life-pos/notifications/:secret", handleLifePosNotification);
+app.post("/api/life-pos/notifications/:secret/:orgGuid", handleLifePosNotification);
 
 app.post("/api/auth/login", async (req, res, next) => {
   try {

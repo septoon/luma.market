@@ -21,7 +21,7 @@ import { FormEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useS
 import { api, clearSessionToken, getSavedUserName, hasSessionToken, isUnauthorizedError, setSessionToken, type ReportQuery } from "./api";
 import type { Analytics, AuthOrganization, DashboardSummary, Operation, PaymentKind, ReportPeriod } from "./types";
 
-type View = "welcome" | "login" | "home" | "operation" | "analytics" | "journal" | "returns";
+type View = "boot" | "welcome" | "login" | "home" | "operation" | "analytics" | "journal" | "returns";
 type JournalPeriod = "today" | "yesterday" | "week" | "all";
 type SalesChartMode = "hours" | "days" | "weeks";
 type SoldItem = { name: string; quantity: number; unit: string; amount: number };
@@ -1221,7 +1221,7 @@ function AnalyticsScreen({
 }
 
 export function App() {
-  const [view, setView] = useState<View>("welcome");
+  const [view, setView] = useState<View>(() => (hasSessionToken() ? "boot" : "welcome"));
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
@@ -1353,6 +1353,15 @@ export function App() {
     () => selectedOperationDetails ?? operations.find((operation) => operation.id === selectedOperationId) ?? (selectedOperationId ? null : operations[0]),
     [operations, selectedOperationDetails, selectedOperationId],
   );
+
+  if (view === "boot") {
+    return (
+      <main className="screen loadingScreen">
+        <RefreshCw className="spin" />
+        <p>Загружаем личный кабинет...</p>
+      </main>
+    );
+  }
 
   if (view === "welcome") return <WelcomeScreen onStart={() => setView("login")} />;
   if (view === "login") {

@@ -54,7 +54,7 @@ app.get("/api/push/public-key", (req, res) => {
   });
 });
 
-app.post("/api/push/subscriptions", (req, res, next) => {
+app.post("/api/push/subscriptions", async (req, res, next) => {
   try {
     const session = getSession(req.header("X-Luma-Session"));
     if (!session) {
@@ -71,6 +71,12 @@ app.post("/api/push/subscriptions", (req, res, next) => {
       }),
     });
     savePushSubscription(session, schema.parse(req.body));
+    const notificationsUrl = process.env.LIFE_POS_NOTIFICATIONS_URL;
+    if (notificationsUrl) {
+      await lifePosClient.configureOperationNotifications(session, notificationsUrl).catch((error) => {
+        console.warn("Failed to configure LIFE POS notifications after push subscription", error);
+      });
+    }
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -120,6 +126,7 @@ async function handleLifePosNotification(req: express.Request, res: express.Resp
 
     lifePosClient.clearSalesCache();
     const result = await notifyLifePosWebhook(req.body);
+    console.log("LIFE POS notification processed", result);
     res.json({ ok: true, ...result });
   } catch (error) {
     next(error);

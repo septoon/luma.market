@@ -13,7 +13,14 @@ import {
   notifyLifePosWebhook,
   savePushSubscription,
 } from "./pushSubscriptions.js";
-import { consumePendingAuth, createPendingAuth, createSession, deleteSession, getSession } from "./sessionStore.js";
+import {
+  consumePendingAuth,
+  createPendingAuth,
+  createSession,
+  deleteSession,
+  getSession,
+  type LifePosSession,
+} from "./sessionStore.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
@@ -47,6 +54,15 @@ function requireSession(req: express.Request, res: express.Response) {
   return session;
 }
 
+async function configureLifePosNotificationsForSession(session: LifePosSession, context: string) {
+  const notificationsUrl = process.env.LIFE_POS_NOTIFICATIONS_URL;
+  if (!notificationsUrl) return;
+
+  await lifePosClient.configureOperationNotifications(session, notificationsUrl).catch((error) => {
+    console.warn(`Failed to configure LIFE POS notifications after ${context}`, error);
+  });
+}
+
 app.get("/api/push/public-key", (req, res) => {
   res.json({
     publicKey: getWebPushPublicKey(),
@@ -71,12 +87,7 @@ app.post("/api/push/subscriptions", async (req, res, next) => {
       }),
     });
     savePushSubscription(session, schema.parse(req.body));
-    const notificationsUrl = process.env.LIFE_POS_NOTIFICATIONS_URL;
-    if (notificationsUrl) {
-      await lifePosClient.configureOperationNotifications(session, notificationsUrl).catch((error) => {
-        console.warn("Failed to configure LIFE POS notifications after push subscription", error);
-      });
-    }
+    await configureLifePosNotificationsForSession(session, "push subscription");
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -151,8 +162,11 @@ app.post("/api/auth/login", async (req, res, next) => {
     if (organizations.length === 1) {
       const org = organizations[0];
       const userName = await lifePosClient.getCurrentUserNameByToken(token, org.guid).catch(() => undefined);
+      const sessionToken = createSession(token, org, userName);
+      const session = getSession(sessionToken);
+      if (session) await configureLifePosNotificationsForSession(session, "login");
       res.json({
-        sessionToken: createSession(token, org, userName),
+        sessionToken,
         org,
         userName,
         organizations,
@@ -186,9 +200,12 @@ app.post("/api/auth/select-org", async (req, res, next) => {
     const userName =
       (await lifePosClient.getCurrentUserNameByToken(pending.lifePosToken, pending.org.guid).catch(() => undefined)) ??
       pending.userName;
+    const sessionToken = createSession(pending.lifePosToken, pending.org, userName);
+    const session = getSession(sessionToken);
+    if (session) await configureLifePosNotificationsForSession(session, "organization selection");
 
     res.json({
-      sessionToken: createSession(pending.lifePosToken, pending.org, userName),
+      sessionToken,
       org: pending.org,
       userName,
     });
